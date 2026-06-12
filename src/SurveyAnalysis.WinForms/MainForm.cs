@@ -1,7 +1,9 @@
 using System;
 using System.ComponentModel;
 using System.Drawing;
+using System.IO;
 using System.Windows.Forms;
+using SurveyAnalysis.Data;
 using SurveyAnalysis.Models;
 using SurveyAnalysis.ViewModels;
 
@@ -32,12 +34,12 @@ public sealed class MainForm : Form
         _shell = new MainWindowViewModel(AppServices.Projects, AppServices.Settings, AppServices.Responses, AppServices.Analytics);
         _shell.PropertyChanged += OnShellPropertyChanged;
 
-        // Modal-dialog requests. The dialogs are migrated in a later phase; for now they show a notice
-        // so navigation never dead-ends or throws.
-        _shell.CreateProjectRequested += () => ShowPending("プロジェクト作成");
-        _shell.CreateProjectFromCsvRequested += () => ShowPending("CSV からプロジェクトを作る");
+        // Modal-dialog requests. The design dialog (create / edit / CSV-seeded) is wired here; the
+        // import and settings dialogs are migrated in a following step (placeholder notices for now).
+        _shell.CreateProjectRequested += OnCreateProject;
+        _shell.CreateProjectFromCsvRequested += OnCreateProjectFromCsv;
         _shell.ImportRequested += _ => ShowPending("インポート (CSV)");
-        _shell.EditSchemaRequested += _ => ShowPending("データ項目の編集");
+        _shell.EditSchemaRequested += OnEditSchema;
 
         RebuildSidebar();
         SwapContent();
@@ -201,6 +203,47 @@ public sealed class MainForm : Form
         BackColor = Theme.SidebarHover,
         Margin = new Padding(14, 8, 14, 8),
     };
+
+    // 新規プロジェクト作成（モーダル）。確定された下書きを保存して開く。
+    private void OnCreateProject()
+    {
+        using var form = new ProjectDesignForm(new ProjectDesignViewModel());
+        if (form.ShowDialog(this) == DialogResult.OK && form.ResultProject is { } project)
+            _shell.FinishProjectCreation(project);
+    }
+
+    // データ項目の編集（モーダル）。編集モードで開き、保存された下書きを永続化する。
+    private void OnEditSchema(Project project)
+    {
+        using var form = new ProjectDesignForm(new ProjectDesignViewModel(project));
+        if (form.ShowDialog(this) == DialogResult.OK && form.ResultProject is { } edited)
+            _shell.ApplySchemaEdit(edited);
+    }
+
+    // CSV からプロジェクトを作る。ファイルを選び、列から起こしたスキーマを作成ダイアログで確認させ、
+    // 確定で保存＋同じCSVの全行を回答として取り込む。
+    private void OnCreateProjectFromCsv()
+    {
+        using var picker = new OpenFileDialog
+        {
+            Title = "CSV / TSV ファイルからプロジェクトを作成",
+            Filter = "CSV / TSV / テキスト (*.csv;*.tsv;*.txt)|*.csv;*.tsv;*.txt|すべてのファイル (*.*)|*.*",
+        };
+        if (picker.ShowDialog(this) != DialogResult.OK)
+            return;
+
+        var vm = new ProjectDesignViewModel(File.ReadAllBytes(picker.FileName), Path.GetFileName(picker.FileName));
+        if (vm.SourceCsv is null || vm.SourceCsv.Header.Count == 0)
+        {
+            MessageBox.Show(this, "このファイルから列を読み取れませんでした。", "CSV からプロジェクトを作る",
+                MessageBoxButtons.OK, MessageBoxIcon.Warning);
+            return;
+        }
+
+        using var form = new ProjectDesignForm(vm);
+        if (form.ShowDialog(this) == DialogResult.OK && form.ResultProject is { } project && vm.SourceCsv is { } csv)
+            _shell.FinishProjectFromCsv(project, csv, Path.GetFileName(picker.FileName));
+    }
 
     // Placeholder for a dialog/screen not yet migrated, so navigation never dead-ends during the port.
     private void ShowPending(string what) =>
