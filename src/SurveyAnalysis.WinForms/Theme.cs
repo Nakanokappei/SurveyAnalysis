@@ -22,6 +22,13 @@ internal static class Theme
     public static readonly Color BodyText = ColorTranslator.FromHtml("#475569");
     public static readonly Color CardBorder = ColorTranslator.FromHtml("#E2E8F0");
 
+    // Secondary text and KPI value colours used on the dashboard.
+    public static readonly Color Muted = ColorTranslator.FromHtml("#64748B");
+    public static readonly Color Faint = ColorTranslator.FromHtml("#94A3B8");
+    public static readonly Color Danger = ColorTranslator.FromHtml("#DC2626");
+    public static readonly Color Success = ColorTranslator.FromHtml("#16A34A");
+    public static readonly Color BarTrackText = ColorTranslator.FromHtml("#334155");
+
     // Accent (primary action) — Windows-standard blue.
     public static readonly Color Accent = ColorTranslator.FromHtml("#005FB8");
     public static readonly Color AccentText = Color.White;

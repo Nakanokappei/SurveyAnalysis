@@ -10,6 +10,7 @@ internal static class ViewFactory
     public static UserControl Create(ViewModelBase page) => page switch
     {
         WelcomeViewModel vm => new WelcomeControl(vm),
+        DashboardViewModel vm => new DashboardControl(vm),
         _ => new PlaceholderControl(page),
     };
 }
