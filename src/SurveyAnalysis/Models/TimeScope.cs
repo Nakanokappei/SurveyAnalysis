@@ -22,9 +22,6 @@ public sealed record TimeScope(
     public bool IsTerminal => Depth >= 4;
 }
 
-// One child group under a scope: its label and count, plus the scope you land in when you click it.
-public sealed record TimeChild(string Label, int Count, TimeScope Scope);
-
 // One clickable breadcrumb segment: the text to show (its leading "＞" separator already baked in)
 // and the path depth it returns to when clicked.
 public sealed record Crumb(string Display, int Index);

@@ -80,10 +80,7 @@ public partial class TimeSliceViewModel : PeriodScopedViewModel
         // sentiment) field — never from a personal-information field.
         _dateFieldName = AnalyticsRepository.DateField(project);
         // The grouping field (the time basis) is the rows, so it is not also shown as a column.
-        Columns = project.Fields
-            .Where(f => !string.IsNullOrWhiteSpace(f.Name) && f.Name != _dateFieldName)
-            .Select(f => new AnalysisColumn(f.Name, FieldAggregationInfo.For(f)))
-            .ToList();
+        Columns = ColumnsFor(project, _dateFieldName);
         _excerptFieldName =
             project.Fields.FirstOrDefault(f => f.FieldType == FieldType.FreeText)?.Name
             ?? project.Fields.FirstOrDefault(f => f.Analysis == AnalysisMethod.Sentiment)?.Name;

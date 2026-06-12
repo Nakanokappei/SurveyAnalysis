@@ -1,3 +1,5 @@
+using System;
+using System.Linq;
 using System.Text;
 using SurveyAnalysis.Data;
 using SurveyAnalysis.Models;
@@ -47,15 +49,17 @@ public class ImportViewModelTests
         // Raw responses landed.
         Assert.Equal(2, responses.CountForProject(project.Id));
 
-        // The star was rebuilt during the merge: the time slice groups the two months without anyone
-        // opening a slice first. An empty result here would mean the ETL wasn't wired into import.
-        var byMonth = analytics.AggregateByTime(project.Id, TimeGrain.Month);
-        Assert.Equal(new[] { ("2026年8月", 1), ("2026年5月", 1) }, byMonth);
+        // The star was rebuilt during the merge: the time slice groups the two responses (both 2026
+        // 年度) without anyone opening a slice first. An empty result here would mean the ETL wasn't
+        // wired into import.
+        var noColumns = Array.Empty<AnalysisColumn>();
+        var byYear = analytics.AggregateRows(project.Id, AnalysisGrouping.Time, TimeScope.Root, null, null, noColumns).Rows;
+        Assert.Equal(new[] { ("2026年度", 2) }, byYear.Select(r => (r.Label, r.Count)).ToArray());
 
         // And the region slice reflects the prefecture column.
-        var byRegion = analytics.AggregateBy(project.Id, SliceKind.Region);
+        var byRegion = analytics.AggregateRows(project.Id, AnalysisGrouping.Region, TimeScope.Root, null, null, noColumns).Rows;
         Assert.Equal(2, byRegion.Count);
-        Assert.Contains(("東京都", 1), byRegion);
-        Assert.Contains(("大阪府", 1), byRegion);
+        Assert.Contains(byRegion, r => r.Label == "東京都" && r.Count == 1);
+        Assert.Contains(byRegion, r => r.Label == "大阪府" && r.Count == 1);
     }
 }

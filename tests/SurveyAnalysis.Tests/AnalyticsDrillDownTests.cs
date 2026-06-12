@@ -1,3 +1,4 @@
+using System;
 using System.Collections.Generic;
 using System.Linq;
 using SurveyAnalysis.Data;
@@ -6,11 +7,14 @@ using Xunit;
 
 namespace SurveyAnalysis.Tests;
 
-// Drill-down ETL queries behind the 時間別 analysis view: 全期間→年度→月→週→日→個票. The seed straddles
-// two fiscal years (April-start) and puts two responses in one ISO week so the week/day split is
-// observable. 2026/05/11 is a Monday, so 05/11 and 05/12 share an ISO week and 05/18 starts the next.
+// The time drill-down behind 時間別 → 期間, driven through the production AggregateRows path: 全期間→
+// 年度→月→週→日, then the 個票 via ResponsesForScope/ResponsesForWeekday. The seed straddles two fiscal
+// years (April-start) and puts two responses in one ISO week so the week/day split is observable.
+// 2026/05/11 is a Monday, so 05/11 and 05/12 share an ISO week and 05/18 starts the next.
 public class AnalyticsDrillDownTests
 {
+    private static readonly AnalysisColumn[] NoColumns = Array.Empty<AnalysisColumn>();
+
     private static SurveyResponse Response(string date, string comment) =>
         new()
         {
@@ -34,17 +38,20 @@ public class AnalyticsDrillDownTests
             Response("2026/05/11", "月曜の朝"),   // FY2026, 2026年5月, ISO week A, Mon
             Response("2026/05/12", "火曜"),       // FY2026, 2026年5月, ISO week A, Tue
             Response("2026/05/18", "翌週"),       // FY2026, 2026年5月, ISO week B, Mon
-            Response("2026/08/03", "夏"),         // FY2026, 2026年8月
-            Response("2026/02/14", "冬"),         // FY2025 (Jan–Mar → 前年度)
-            Response("2025/12/25", "年末"),       // FY2025
+            Response("2026/08/03", "夏"),         // FY2026, 2026年8月, Mon
+            Response("2026/02/14", "冬"),         // FY2025 (Jan–Mar → 前年度), Sat
+            Response("2025/12/25", "年末"),       // FY2025, Thu
         });
 
         analytics.Rebuild(project);
         return (temp, analytics, pid);
     }
 
-    private static TimeChild Child(IReadOnlyList<TimeChild> children, string label) =>
-        children.Single(c => c.Label == label);
+    // The child rows of a time scope (year/month/week/day depending on depth), via the live path.
+    private static IReadOnlyList<AnalysisRow> TimeRows(AnalyticsRepository a, long pid, TimeScope scope, long? from = null, long? to = null) =>
+        a.AggregateRows(pid, AnalysisGrouping.Time, scope, from, to, NoColumns).Rows;
+
+    private static AnalysisRow Row(IReadOnlyList<AnalysisRow> rows, string label) => rows.Single(r => r.Label == label);
 
     [Fact]
     public void Root_children_are_fiscal_years()
@@ -52,11 +59,12 @@ public class AnalyticsDrillDownTests
         var (temp, analytics, pid) = Seed();
         using var _ = temp;
 
-        var years = analytics.DrillTimeChildren(pid, TimeScope.Root);
+        var years = TimeRows(analytics, pid, TimeScope.Root);
 
-        Assert.Equal(4, Child(years, "2026年度").Count);
-        Assert.Equal(2, Child(years, "2025年度").Count);
-        Assert.Equal(6, years.Sum(c => c.Count)); // parent total = sum of children
+        Assert.Equal(4, Row(years, "2026年度").Count);
+        Assert.Equal(2, Row(years, "2025年度").Count);
+        Assert.Equal(6, years.Sum(r => r.Count));            // parent total = sum of children
+        Assert.Equal("2026年度", years[0].Label);             // newest fiscal year first
     }
 
     [Fact]
@@ -65,24 +73,22 @@ public class AnalyticsDrillDownTests
         var (temp, analytics, pid) = Seed();
         using var _ = temp;
 
-        // 年度 → 月
-        var fy2026 = Child(analytics.DrillTimeChildren(pid, TimeScope.Root), "2026年度");
-        var months = analytics.DrillTimeChildren(pid, fy2026.Scope);
-        Assert.Equal(3, Child(months, "2026年5月").Count);
-        Assert.Equal(1, Child(months, "2026年8月").Count);
+        // 年度 → 月 (newest month first)
+        var months = TimeRows(analytics, pid, Row(TimeRows(analytics, pid, TimeScope.Root), "2026年度").ChildScope!);
+        Assert.Equal(new[] { "2026年8月", "2026年5月" }, months.Select(r => r.Label).ToArray());
+        Assert.Equal(3, Row(months, "2026年5月").Count);
 
         // 月 → 週: 2026年5月 splits into two ISO weeks summing to 3 (one week has the 11th & 12th).
-        var may = Child(months, "2026年5月");
-        var weeks = analytics.DrillTimeChildren(pid, may.Scope);
+        var weeks = TimeRows(analytics, pid, Row(months, "2026年5月").ChildScope!);
         Assert.Equal(2, weeks.Count);
         Assert.Equal(3, weeks.Sum(w => w.Count));
         var weekOfTwo = weeks.Single(w => w.Count == 2);
 
         // 週 → 日: that week breaks into the two individual dates.
-        var days = analytics.DrillTimeChildren(pid, weekOfTwo.Scope);
+        var days = TimeRows(analytics, pid, weekOfTwo.ChildScope!);
         Assert.Equal(2, days.Count);
-        Assert.Equal(1, Child(days, "2026-05-11").Count);
-        Assert.Equal(1, Child(days, "2026-05-12").Count);
+        Assert.Equal(1, Row(days, "2026-05-11").Count);
+        Assert.Equal(1, Row(days, "2026-05-12").Count);
     }
 
     [Fact]
@@ -91,14 +97,14 @@ public class AnalyticsDrillDownTests
         var (temp, analytics, pid) = Seed();
         using var _ = temp;
 
-        var fy2026 = Child(analytics.DrillTimeChildren(pid, TimeScope.Root), "2026年度");
-        var may = Child(analytics.DrillTimeChildren(pid, fy2026.Scope), "2026年5月");
-        var week = analytics.DrillTimeChildren(pid, may.Scope).Single(w => w.Count == 2);
-        var may11 = Child(analytics.DrillTimeChildren(pid, week.Scope), "2026-05-11");
+        var months = TimeRows(analytics, pid, Row(TimeRows(analytics, pid, TimeScope.Root), "2026年度").ChildScope!);
+        var weeks = TimeRows(analytics, pid, Row(months, "2026年5月").ChildScope!);
+        var days = TimeRows(analytics, pid, weeks.Single(w => w.Count == 2).ChildScope!);
+        var may11 = Row(days, "2026-05-11");
 
-        Assert.True(may11.Scope.IsTerminal);
+        Assert.True(may11.ChildScope!.IsTerminal); // a day is the deepest level → individual responses
 
-        var rows = analytics.ResponsesForScope(pid, may11.Scope);
+        var rows = analytics.ResponsesForScope(pid, may11.ChildScope!);
         Assert.Single(rows);
         Assert.Equal("2026/05/11", rows[0]["記入日"]);
         Assert.Equal("月曜の朝", rows[0]["ご意見"]);
@@ -111,13 +117,24 @@ public class AnalyticsDrillDownTests
         using var _ = temp;
 
         // Window = May 2026 only → the three May responses (11th, 12th, 18th), all in 2026年度.
-        var years = analytics.DrillTimeChildren(pid, TimeScope.Root, 20260501, 20260531);
-        Assert.Single(years);
-        Assert.Equal("2026年度", years[0].Label);
-        Assert.Equal(3, years[0].Count);
+        var years = TimeRows(analytics, pid, TimeScope.Root, 20260501, 20260531);
+        Assert.Equal(new[] { ("2026年度", 3) }, years.Select(r => (r.Label, r.Count)).ToArray());
 
-        var dow = analytics.DayOfWeekForScope(pid, TimeScope.Root, 20260501, 20260531);
-        Assert.Equal(3, dow.Sum(g => g.Count));
+        var weekdays = analytics.AggregateRows(pid, AnalysisGrouping.Weekday, TimeScope.Root, 20260501, 20260531, NoColumns).Rows;
+        Assert.Equal(3, weekdays.Sum(r => r.Count));
+    }
+
+    [Fact]
+    public void Weekday_grouping_orders_monday_first()
+    {
+        var (temp, analytics, pid) = Seed();
+        using var _ = temp;
+
+        var weekdays = analytics.AggregateRows(pid, AnalysisGrouping.Weekday, TimeScope.Root, null, null, NoColumns).Rows;
+
+        Assert.Equal("月曜日", weekdays[0].Label);          // Mon→Sun ordering
+        Assert.Equal(3, Row(weekdays, "月曜日").Count);     // 05/11, 05/18, 08/03
+        Assert.Equal(6, weekdays.Sum(r => r.Count));
     }
 
     [Fact]
@@ -131,24 +148,5 @@ public class AnalyticsDrillDownTests
         Assert.Equal(3, monday.Count);
         Assert.Contains(monday, r => r["記入日"] == "2026/05/11");
         Assert.All(monday, r => Assert.True(r.ContainsKey("ご意見")));
-    }
-
-    [Fact]
-    public void Day_of_week_table_reflects_the_scope()
-    {
-        var (temp, analytics, pid) = Seed();
-        using var _ = temp;
-
-        // Whole dataset: every response counts once across the weekday buckets.
-        var all = analytics.DayOfWeekForScope(pid, TimeScope.Root);
-        Assert.Equal(6, all.Sum(g => g.Count));
-
-        // Scoped to 2026年5月: only that month's three responses (Mon ×2 on 11th/18th, Tue ×1 on 12th).
-        var fy2026 = Child(analytics.DrillTimeChildren(pid, TimeScope.Root), "2026年度");
-        var may = Child(analytics.DrillTimeChildren(pid, fy2026.Scope), "2026年5月");
-        var mayDow = analytics.DayOfWeekForScope(pid, may.Scope).ToDictionary(g => g.Label, g => g.Count);
-        Assert.Equal(2, mayDow["月曜日"]);
-        Assert.Equal(1, mayDow["火曜日"]);
-        Assert.Equal(3, mayDow.Values.Sum());
     }
 }

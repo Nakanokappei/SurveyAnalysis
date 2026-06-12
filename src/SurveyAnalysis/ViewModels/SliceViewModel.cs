@@ -60,10 +60,7 @@ public partial class SliceViewModel : PeriodScopedViewModel
         var groupingField = kind == SliceKind.Topic
             ? AnalyticsRepository.TopicField(project)
             : AnalyticsRepository.RegionField(project);
-        Columns = project.Fields
-            .Where(f => !string.IsNullOrWhiteSpace(f.Name) && f.Name != groupingField)
-            .Select(f => new AnalysisColumn(f.Name, FieldAggregationInfo.For(f)))
-            .ToList();
+        Columns = ColumnsFor(project, groupingField);
 
         // Keep the star current with the latest imported responses.
         analytics.Rebuild(project);

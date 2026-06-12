@@ -60,10 +60,7 @@ public partial class WeekdaySliceViewModel : PeriodScopedViewModel
         _projectId = project.Id;
         _dateFieldName = AnalyticsRepository.DateField(project);
         // The time basis is the rows (曜日), so the date field is not also shown as a column.
-        Columns = project.Fields
-            .Where(f => !string.IsNullOrWhiteSpace(f.Name) && f.Name != _dateFieldName)
-            .Select(f => new AnalysisColumn(f.Name, FieldAggregationInfo.For(f)))
-            .ToList();
+        Columns = ColumnsFor(project, _dateFieldName);
 
         _excerptFieldName =
             project.Fields.FirstOrDefault(f => f.FieldType == FieldType.FreeText)?.Name

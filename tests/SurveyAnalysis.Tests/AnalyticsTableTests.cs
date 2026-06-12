@@ -1,3 +1,4 @@
+using System;
 using System.Collections.Generic;
 using System.Linq;
 using SurveyAnalysis.Data;
@@ -82,6 +83,7 @@ public class AnalyticsTableTests
         using var _ = temp;
 
         var table = analytics.AggregateRows(pid, AnalysisGrouping.Region, TimeScope.Root, null, null, columns);
+        Assert.Equal("東京都", table.Rows[0].Label); // largest group first
         var tokyo = table.Rows.Single(r => r.Label == "東京都");
 
         // 東京都 has two responses (05/11 評価3, 05/18 評価2): 都道府県種類数=1, 評価合計=5, 満足度平均=(4+5)/2=4.5.
@@ -89,5 +91,53 @@ public class AnalyticsTableTests
         Assert.Equal("1", tokyo.Cells[1]); // 都道府県 distinct
         Assert.Equal("5", tokyo.Cells[2]); // 評価 sum
         Assert.Equal("4.5", tokyo.Cells[3]); // 満足度 average
+    }
+
+    [Fact]
+    public void Region_without_field_is_unset_and_topic_is_unanalyzed()
+    {
+        using var temp = new TempDatabase();
+        var projects = new ProjectRepository(temp.Db);
+        var responses = new ResponseRepository(temp.Db);
+        var analytics = new AnalyticsRepository(temp.Db);
+
+        var project = new Project { Name = "P" };
+        project.Fields.Add(new DataField { Name = "記入日", FieldType = FieldType.Date, UseForAggregation = true });
+        project.Fields.Add(new DataField { Name = "ご意見", FieldType = FieldType.FreeText });
+        var pid = projects.Insert(project);
+        responses.InsertResponses(pid, "t.csv", new[]
+        {
+            Response(("記入日", "2026/05/11"), ("ご意見", "a")),
+            Response(("記入日", "2026/05/12"), ("ご意見", "b")),
+        });
+        analytics.Rebuild(project);
+        var noColumns = Array.Empty<AnalysisColumn>();
+
+        // No region field → every response falls into 「（未設定）」; no LLM topic → 「（未分析）」.
+        var region = analytics.AggregateRows(pid, AnalysisGrouping.Region, TimeScope.Root, null, null, noColumns).Rows;
+        Assert.Equal(new[] { ("（未設定）", 2) }, region.Select(r => (r.Label, r.Count)).ToArray());
+
+        var topic = analytics.AggregateRows(pid, AnalysisGrouping.Topic, TimeScope.Root, null, null, noColumns).Rows;
+        Assert.Equal(new[] { ("（未分析）", 2) }, topic.Select(r => (r.Label, r.Count)).ToArray());
+    }
+
+    [Fact]
+    public void Rebuild_is_idempotent()
+    {
+        using var temp = new TempDatabase();
+        var projects = new ProjectRepository(temp.Db);
+        var responses = new ResponseRepository(temp.Db);
+        var analytics = new AnalyticsRepository(temp.Db);
+
+        var project = new Project { Name = "P" };
+        project.Fields.Add(new DataField { Name = "記入日", FieldType = FieldType.Date, UseForAggregation = true });
+        var pid = projects.Insert(project);
+        responses.InsertResponses(pid, "t.csv", new[] { Response(("記入日", "2026/05/20")) });
+
+        analytics.Rebuild(project);
+        analytics.Rebuild(project); // second run must not double-count
+
+        var years = analytics.AggregateRows(pid, AnalysisGrouping.Time, TimeScope.Root, null, null, Array.Empty<AnalysisColumn>()).Rows;
+        Assert.Equal(new[] { ("2026年度", 1) }, years.Select(r => (r.Label, r.Count)).ToArray());
     }
 }
