@@ -1,0 +1,22 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:vm="using:SurveyAnalysis.ViewModels"
+             xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+             xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+             mc:Ignorable="d" d:DesignWidth="860" d:DesignHeight="720"
+             x:Class="SurveyAnalysis.Views.WelcomeView"
+             x:DataType="vm:WelcomeViewModel">
+
+    <StackPanel HorizontalAlignment="Center" VerticalAlignment="Center" Spacing="14" MaxWidth="460">
+        <TextBlock Text="プロジェクトを開始しましょう" FontSize="30" FontWeight="Bold" Foreground="#0F172A"
+                   HorizontalAlignment="Center"/>
+        <TextBlock TextWrapping="Wrap" TextAlignment="Center" Foreground="#475569" FontSize="14"
+                   Text="プロジェクトを作成すると、スキャン画像の読み込み・トピック割り当て・感情分析・月次レポートを管理できます。"/>
+        <Button Content="＋ プロジェクトを作る" Command="{Binding CreateProjectCommand}"
+                HorizontalAlignment="Center" Padding="22,12" FontSize="15"
+                Background="#005FB8" Foreground="White" CornerRadius="4"/>
+        <Button Content="サンプルプロジェクトを開く" Command="{Binding OpenSampleCommand}"
+                HorizontalAlignment="Center" Padding="18,9" FontSize="13"
+                Background="Transparent" Foreground="#005FB8"/>
+    </StackPanel>
+</UserControl>

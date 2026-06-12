@@ -1,0 +1,253 @@
+<Window xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:vm="using:SurveyAnalysis.ViewModels"
+        xmlns:behaviors="using:SurveyAnalysis.Behaviors"
+        xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+        xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+        mc:Ignorable="d" d:DesignWidth="890" d:DesignHeight="550"
+        x:Class="SurveyAnalysis.Views.SettingsWindow"
+        x:DataType="vm:SettingsViewModel"
+        Width="890" Height="550"
+        CanResize="False"
+        WindowStartupLocation="CenterOwner"
+        Title="設定">
+
+    <Design.DataContext>
+        <vm:SettingsViewModel/>
+    </Design.DataContext>
+
+    <Window.Styles>
+        <!-- Right-aligned label sitting in the fixed first column. Top-aligned + a small top
+             margin so it lines up with the vertical centre of the 36px-high field beside it,
+             which keeps the label/field seam straight even when a hint sits under the field. -->
+        <Style Selector="TextBlock.fieldLabel">
+            <Setter Property="Foreground" Value="#475569"/>
+            <Setter Property="FontSize" Value="13"/>
+            <Setter Property="HorizontalAlignment" Value="Right"/>
+            <Setter Property="VerticalAlignment" Value="Top"/>
+            <Setter Property="TextWrapping" Value="Wrap"/>
+            <Setter Property="Margin" Value="0,7,16,0"/>
+        </Style>
+        <Style Selector="TextBlock.section">
+            <Setter Property="Foreground" Value="#0F172A"/>
+            <Setter Property="FontSize" Value="13"/>
+            <Setter Property="FontWeight" Value="SemiBold"/>
+        </Style>
+        <Style Selector="TextBlock.hint">
+            <Setter Property="Foreground" Value="#94A3B8"/>
+            <Setter Property="FontSize" Value="11"/>
+            <Setter Property="TextWrapping" Value="Wrap"/>
+        </Style>
+        <Style Selector="Border.divider">
+            <Setter Property="Height" Value="1"/>
+            <Setter Property="Background" Value="#E2E8F0"/>
+            <Setter Property="Margin" Value="0,2,0,0"/>
+        </Style>
+        <!-- Uniform field height so every textbox / combo lines up on a shared baseline grid. -->
+        <Style Selector="TextBox">
+            <Setter Property="Height" Value="36"/>
+            <Setter Property="VerticalContentAlignment" Value="Center"/>
+        </Style>
+        <Style Selector="ComboBox">
+            <Setter Property="Height" Value="36"/>
+            <Setter Property="VerticalContentAlignment" Value="Center"/>
+            <Setter Property="HorizontalAlignment" Value="Stretch"/>
+        </Style>
+        <!-- Tabs are navigation, not the point of the dialog: keep them at body-text size so
+             the settings fields stay the visual focus. (Fluent's default tab font is large.) -->
+        <Style Selector="TabItem">
+            <Setter Property="FontSize" Value="14"/>
+            <Setter Property="MinHeight" Value="0"/>
+            <Setter Property="Padding" Value="0,6,0,6"/>
+            <Setter Property="Margin" Value="0,0,22,0"/>
+        </Style>
+        <!-- Fluent draws an underline pip that sat on the focused tab's text. Hide it and
+             indicate the selected tab with accent-coloured, semibold text instead. -->
+        <Style Selector="TabItem:selected /template/ Border#PART_SelectedPipe">
+            <Setter Property="IsVisible" Value="False"/>
+        </Style>
+        <Style Selector="TabItem:selected">
+            <Setter Property="Foreground" Value="#005FB8"/>
+            <Setter Property="FontWeight" Value="SemiBold"/>
+        </Style>
+    </Window.Styles>
+
+    <!-- The reset action shares the tab-strip band (floated top-right) so it sits close to the
+         tabs instead of leaving a gap above them. The window title bar already says "設定". -->
+    <Grid>
+
+        <TabControl Margin="16,12,16,16">
+
+            <!-- ========== 全般 ========== -->
+            <TabItem Header="全般">
+                <ScrollViewer>
+                    <StackPanel Margin="20,20,28,20" Spacing="16">
+
+                        <Grid ColumnDefinitions="150,*">
+                            <TextBlock Grid.Column="0" Classes="fieldLabel" Text="会社名"/>
+                            <StackPanel Grid.Column="1" Spacing="6">
+                                <TextBox Text="{Binding CompanyName}" Watermark="例：○○ケーブル株式会社"
+                                         behaviors:RequiredField.IsRequired="True"/>
+                                <TextBlock Classes="hint" Text="月次レポートのヘッダーなどに表示されます。"/>
+                            </StackPanel>
+                        </Grid>
+
+                        <Grid ColumnDefinitions="150,*">
+                            <TextBlock Grid.Column="0" Classes="fieldLabel" Text="読み取りフォルダ"/>
+                            <Grid Grid.Column="1" ColumnDefinitions="*,Auto">
+                                <TextBox Grid.Column="0" Text="{Binding ScanFolderPath}" Margin="0,0,10,0"/>
+                                <Button Grid.Column="1" Content="参照…" Command="{Binding BrowseFolderCommand}"
+                                        Height="32" Padding="16,0"
+                                        VerticalContentAlignment="Center" HorizontalContentAlignment="Center"
+                                        Background="#E2E8F0" Foreground="#0F172A" CornerRadius="4"/>
+                            </Grid>
+                        </Grid>
+
+                        <Grid ColumnDefinitions="150,*">
+                            <TextBlock Grid.Column="0" Classes="fieldLabel" Text="アーカイブ"
+                                       VerticalAlignment="Center" Margin="0,0,16,0"/>
+                            <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="10" VerticalAlignment="Center">
+                                <ToggleSwitch IsChecked="{Binding ArchiveAfterScan}" OnContent="" OffContent=""/>
+                                <TextBlock Text="読み取り後にサブフォルダへ移動して二重読み取りを防ぐ"
+                                           VerticalAlignment="Center" Foreground="#334155"/>
+                            </StackPanel>
+                        </Grid>
+
+                        <Grid ColumnDefinitions="150,*">
+                            <TextBlock Grid.Column="0" Classes="fieldLabel" Text="アーカイブ名"/>
+                            <StackPanel Grid.Column="1" Spacing="6">
+                                <TextBox Text="{Binding ArchiveSubfolderName}" IsEnabled="{Binding ArchiveAfterScan}"/>
+                                <TextBlock Classes="hint"
+                                           Text="読み取り済みのJPGは、読み取りフォルダ直下のこのサブフォルダへ移動されます。"/>
+                            </StackPanel>
+                        </Grid>
+                    </StackPanel>
+                </ScrollViewer>
+            </TabItem>
+
+            <!-- ========== メール ========== -->
+            <TabItem Header="メール">
+                <ScrollViewer>
+                    <StackPanel Margin="20,20,28,20" Spacing="16">
+
+                        <Grid ColumnDefinitions="150,*">
+                            <TextBlock Grid.Column="0" Classes="fieldLabel" Text="差出人"/>
+                            <TextBox Grid.Column="1" Text="{Binding MailFrom}" Watermark="no-reply@example.co.jp"
+                                     behaviors:RequiredField.IsRequired="True"/>
+                        </Grid>
+
+                        <Grid ColumnDefinitions="150,*">
+                            <TextBlock Grid.Column="0" Classes="fieldLabel" Text="宛先"/>
+                            <StackPanel Grid.Column="1" Spacing="6">
+                                <TextBox Text="{Binding MailTo}" Watermark="support@example.co.jp"
+                                         behaviors:RequiredField.IsRequired="True"/>
+                                <TextBlock Classes="hint" Text="ネガティブ検出時のアラートと、月次レポートの送信先になります。"/>
+                            </StackPanel>
+                        </Grid>
+
+                        <TextBlock Classes="section" Text="送信サーバー" Margin="0,4,0,0"/>
+                        <Border Classes="divider"/>
+
+                        <Grid ColumnDefinitions="150,*">
+                            <TextBlock Grid.Column="0" Classes="fieldLabel" Text="サーバー"/>
+                            <ComboBox Grid.Column="1" ItemsSource="{Binding MailServerOptions}"
+                                      SelectedItem="{Binding MailServerType}"/>
+                        </Grid>
+
+                        <!-- Gmail -->
+                        <StackPanel Spacing="16" IsVisible="{Binding IsGmail}">
+                            <Grid ColumnDefinitions="150,*">
+                                <TextBlock Grid.Column="0" Classes="fieldLabel" Text="Gmail アドレス"/>
+                                <TextBox Grid.Column="1" Text="{Binding GmailAddress}" Watermark="example@gmail.com"/>
+                            </Grid>
+                            <Grid ColumnDefinitions="150,*">
+                                <TextBlock Grid.Column="0" Classes="fieldLabel" Text="アプリパスワード"/>
+                                <StackPanel Grid.Column="1" Spacing="6">
+                                    <TextBox Text="{Binding GmailAppPassword}" PasswordChar="●"/>
+                                    <TextBlock Classes="hint"
+                                               Text="Googleアカウントの2段階認証で発行する16桁のアプリパスワードを使用します。"/>
+                                </StackPanel>
+                            </Grid>
+                        </StackPanel>
+
+                        <!-- SMTP -->
+                        <StackPanel Spacing="16" IsVisible="{Binding IsSmtp}">
+                            <Grid ColumnDefinitions="150,*">
+                                <TextBlock Grid.Column="0" Classes="fieldLabel" Text="SMTPサーバー"/>
+                                <Grid Grid.Column="1" ColumnDefinitions="*,14,Auto,6,76">
+                                    <TextBox Grid.Column="0" Text="{Binding SmtpHost}" Watermark="smtp.example.co.jp"/>
+                                    <TextBlock Grid.Column="2" Text="ポート" VerticalAlignment="Center"
+                                               Foreground="#475569" FontSize="13"/>
+                                    <TextBox Grid.Column="4" Text="{Binding SmtpPort}"/>
+                                </Grid>
+                            </Grid>
+                            <Grid ColumnDefinitions="150,*">
+                                <TextBlock Grid.Column="0" Classes="fieldLabel" Text="ユーザー名"/>
+                                <TextBox Grid.Column="1" Text="{Binding SmtpUsername}"/>
+                            </Grid>
+                            <Grid ColumnDefinitions="150,*">
+                                <TextBlock Grid.Column="0" Classes="fieldLabel" Text="パスワード"/>
+                                <TextBox Grid.Column="1" Text="{Binding SmtpPassword}" PasswordChar="●"/>
+                            </Grid>
+                            <Grid ColumnDefinitions="150,*">
+                                <TextBlock Grid.Column="0" Classes="fieldLabel" Text="暗号化"
+                                           VerticalAlignment="Center" Margin="0,0,16,0"/>
+                                <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="10" VerticalAlignment="Center">
+                                    <ToggleSwitch IsChecked="{Binding SmtpUseTls}" OnContent="" OffContent=""/>
+                                    <TextBlock Text="TLS / STARTTLS を使用" VerticalAlignment="Center" Foreground="#334155"/>
+                                </StackPanel>
+                            </Grid>
+                        </StackPanel>
+                    </StackPanel>
+                </ScrollViewer>
+            </TabItem>
+
+            <!-- ========== LLM ========== -->
+            <TabItem Header="LLM">
+                <ScrollViewer>
+                    <StackPanel Margin="20,20,28,20" Spacing="16">
+
+                        <Grid ColumnDefinitions="150,*">
+                            <TextBlock Grid.Column="0" Classes="fieldLabel" Text="APIキー"/>
+                            <Grid Grid.Column="1" ColumnDefinitions="*,Auto">
+                                <TextBox x:Name="ApiKeyBox" Grid.Column="0" Text="{Binding ApiKey}"
+                                         PasswordChar="●" Watermark="sk-..." Margin="0,0,10,0"/>
+                                <ToggleButton Grid.Column="1" Content="表示" Click="OnRevealApiKeyClick"
+                                              Height="32" Padding="14,0" VerticalContentAlignment="Center"/>
+                            </Grid>
+                        </Grid>
+
+                        <Grid ColumnDefinitions="150,*">
+                            <TextBlock Grid.Column="0" Classes="fieldLabel" Text="エンドポイント"/>
+                            <TextBox Grid.Column="1" Text="{Binding Endpoint}" Watermark="https://api.openai.com/v1"/>
+                        </Grid>
+
+                        <TextBlock Classes="section" Text="用途別モデル（OpenAI）" Margin="0,4,0,0"/>
+                        <Border Classes="divider"/>
+
+                        <Grid ColumnDefinitions="150,*">
+                            <TextBlock Grid.Column="0" Classes="fieldLabel" Text="OCR（画像→文字）"/>
+                            <ComboBox Grid.Column="1" ItemsSource="{Binding ModelOptions}" SelectedItem="{Binding OcrModel}"/>
+                        </Grid>
+                        <Grid ColumnDefinitions="150,*">
+                            <TextBlock Grid.Column="0" Classes="fieldLabel" Text="トピック割り当て"/>
+                            <ComboBox Grid.Column="1" ItemsSource="{Binding ModelOptions}" SelectedItem="{Binding TopicModel}"/>
+                        </Grid>
+                        <Grid ColumnDefinitions="150,*">
+                            <TextBlock Grid.Column="0" Classes="fieldLabel" Text="感情極性分析"/>
+                            <ComboBox Grid.Column="1" ItemsSource="{Binding ModelOptions}" SelectedItem="{Binding SentimentModel}"/>
+                        </Grid>
+                        <Grid ColumnDefinitions="150,*">
+                            <TextBlock Grid.Column="0" Classes="fieldLabel" Text="レポート生成"/>
+                            <ComboBox Grid.Column="1" ItemsSource="{Binding ModelOptions}" SelectedItem="{Binding ReportModel}"/>
+                        </Grid>
+                    </StackPanel>
+                </ScrollViewer>
+            </TabItem>
+        </TabControl>
+
+        <Button Content="↺ デフォルトに戻す" Command="{Binding ResetToDefaultsCommand}"
+                HorizontalAlignment="Right" VerticalAlignment="Top" Margin="0,14,24,0"
+                Background="Transparent" Foreground="#64748B" FontSize="12" Padding="8,4"/>
+    </Grid>
+</Window>

@@ -1,0 +1,69 @@
+<Application xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             x:Class="SurveyAnalysis.App"
+             xmlns:local="using:SurveyAnalysis"
+             xmlns:conv="using:SurveyAnalysis.Converters"
+             RequestedThemeVariant="Light">
+             <!-- Light variant keeps the dashboard readable regardless of the host OS theme. -->
+
+    <Application.DataTemplates>
+        <local:ViewLocator/>
+    </Application.DataTemplates>
+
+    <Application.Resources>
+        <conv:EnumLabelConverter x:Key="EnumLabel"/>
+        <conv:HexBrushConverter x:Key="HexBrush"/>
+
+        <!-- Drive the Fluent accent toward the Windows 11 default blue so accent-coloured
+             controls (toggle switches, tab underline, selection, focus) match the native
+             Windows look. In the Light theme Fluent uses the Dark1 shade as the accent fill,
+             so Dark1 is set to the blue our primary buttons use (#005FB8). -->
+        <Color x:Key="SystemAccentColor">#0067C0</Color>
+        <Color x:Key="SystemAccentColorDark1">#005FB8</Color>
+        <Color x:Key="SystemAccentColorDark2">#004E97</Color>
+        <Color x:Key="SystemAccentColorDark3">#003D76</Color>
+        <Color x:Key="SystemAccentColorLight1">#2A7AC8</Color>
+        <Color x:Key="SystemAccentColorLight2">#5096D6</Color>
+        <Color x:Key="SystemAccentColorLight3">#80B5E6</Color>
+    </Application.Resources>
+
+    <Application.Styles>
+        <FluentTheme />
+        <StyleInclude Source="avares://Avalonia.Controls.DataGrid/Themes/Fluent.xaml"/>
+
+        <!-- Default to a font that contains BOTH Latin and Japanese glyphs (Yu Gothic UI on
+             Windows, Hiragino on macOS). Rendering both scripts from one font keeps the
+             baseline aligned in mixed strings like "APIキー" / "読み取り済みのJPG". The Window
+             FontFamily is inherited by all child controls. -->
+        <!-- Bundled BIZ UDPGothic (UI-tuned metrics) so Mac and Windows render identically and
+             text centres correctly. System fonts stay as fallback for symbols/emoji. -->
+        <Style Selector="Window">
+            <Setter Property="FontFamily" Value="avares://SurveyAnalysis/Assets/Fonts#BIZ UDPGothic, Yu Gothic UI, Hiragino Sans, Apple Color Emoji, Segoe UI Emoji, sans-serif"/>
+        </Style>
+
+        <!-- Windows 11 / WinUI uses a tight 4px corner radius on controls. Set it as the
+             default so inputs and buttons feel native everywhere. -->
+        <Style Selector="Button">
+            <Setter Property="CornerRadius" Value="4"/>
+            <Setter Property="VerticalContentAlignment" Value="Center"/>
+        </Style>
+        <Style Selector="TextBox">
+            <Setter Property="CornerRadius" Value="4"/>
+            <Setter Property="VerticalContentAlignment" Value="Center"/>
+        </Style>
+        <Style Selector="ComboBox">
+            <Setter Property="CornerRadius" Value="4"/>
+            <Setter Property="VerticalContentAlignment" Value="Center"/>
+        </Style>
+        <Style Selector="ToggleButton">
+            <Setter Property="CornerRadius" Value="4"/>
+            <Setter Property="VerticalContentAlignment" Value="Center"/>
+        </Style>
+
+        <!-- Required field left empty after losing focus (set by Behaviors/RequiredField). -->
+        <Style Selector="TextBox.invalid">
+            <Setter Property="BorderBrush" Value="#DC2626"/>
+            <Setter Property="Foreground" Value="#DC2626"/>
+        </Style>
+    </Application.Styles>
+</Application>

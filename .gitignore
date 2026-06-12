@@ -1,0 +1,22 @@
+# ---- .NET build artifacts ----
+bin/
+obj/
+[Pp]ublish/
+publish-osx/
+*.user
+*.suo
+project.lock.json
+
+# ---- Rider / VS / VS Code ----
+.idea/
+.vs/
+.vscode/
+
+# ---- macOS / AppleDouble ----
+# This volume is shared with Parallels/Windows; ._ resource-fork files appear and
+# break code signatures. Never track them.
+.DS_Store
+._*
+
+# ---- Claude local settings (machine-local) ----
+.claude/settings.local.json

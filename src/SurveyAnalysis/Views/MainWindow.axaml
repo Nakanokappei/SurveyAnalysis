@@ -1,0 +1,106 @@
+<Window xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:vm="using:SurveyAnalysis.ViewModels"
+        xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+        xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+        mc:Ignorable="d" d:DesignWidth="1165" d:DesignHeight="720"
+        x:Class="SurveyAnalysis.Views.MainWindow"
+        x:DataType="vm:MainWindowViewModel"
+        Width="1165" Height="720"
+        Title="アンケート分析">
+
+    <Design.DataContext>
+        <vm:MainWindowViewModel/>
+    </Design.DataContext>
+
+    <Window.Styles>
+        <!-- Sidebar navigation buttons: full width, left aligned, flat. -->
+        <Style Selector="Button.nav">
+            <Setter Property="HorizontalAlignment" Value="Stretch"/>
+            <Setter Property="HorizontalContentAlignment" Value="Left"/>
+            <Setter Property="Padding" Value="14,10"/>
+            <Setter Property="Margin" Value="8,2"/>
+            <Setter Property="Background" Value="Transparent"/>
+            <Setter Property="Foreground" Value="#E5E7EB"/>
+            <Setter Property="CornerRadius" Value="8"/>
+            <Setter Property="FontSize" Value="14"/>
+        </Style>
+        <Style Selector="Button.nav:pointerover /template/ ContentPresenter">
+            <Setter Property="Background" Value="#334155"/>
+            <Setter Property="Foreground" Value="White"/>
+        </Style>
+        <Style Selector="Button.month">
+            <Setter Property="HorizontalAlignment" Value="Stretch"/>
+            <Setter Property="HorizontalContentAlignment" Value="Left"/>
+            <Setter Property="Padding" Value="26,7"/>
+            <Setter Property="Margin" Value="8,1"/>
+            <Setter Property="Background" Value="Transparent"/>
+            <Setter Property="Foreground" Value="#CBD5E1"/>
+            <Setter Property="CornerRadius" Value="8"/>
+            <Setter Property="FontSize" Value="13"/>
+        </Style>
+        <Style Selector="Button.month:pointerover /template/ ContentPresenter">
+            <Setter Property="Background" Value="#334155"/>
+            <Setter Property="Foreground" Value="White"/>
+        </Style>
+    </Window.Styles>
+
+    <!-- サイドメニュー : メインエリア = 1 : 1.618（黄金比）。star指定で幅に追従。 -->
+    <Grid ColumnDefinitions="1*,1.618*">
+
+        <!-- ===== Sidebar ===== -->
+        <Border Grid.Column="0" Background="#1E293B">
+            <DockPanel LastChildFill="True">
+
+                <!-- App / project title -->
+                <StackPanel DockPanel.Dock="Top" Margin="16,18,16,8" Spacing="2">
+                    <TextBlock Text="プロジェクト" Foreground="White" FontSize="18" FontWeight="SemiBold"/>
+                    <TextBlock Text="{Binding CurrentProject.Name}" Foreground="#93C5FD" FontSize="12"
+                               IsVisible="{Binding IsProjectOpen}" TextTrimming="CharacterEllipsis"/>
+                </StackPanel>
+
+                <!-- Bottom-docked actions -->
+                <StackPanel DockPanel.Dock="Bottom" Margin="0,8,0,12" Spacing="0">
+                    <Button Classes="nav" Content="＋ インポート (CSV)"
+                            Command="{Binding ImportCommand}" IsVisible="{Binding IsProjectOpen}"/>
+                    <Button Classes="nav" Content="✕ プロジェクトを閉じる"
+                            Command="{Binding CloseProjectCommand}" IsVisible="{Binding IsProjectOpen}"/>
+                    <!-- 設定はアプリ全体の設定なので、プロジェクト操作の下（最下段）に置く -->
+                    <Border Height="1" Background="#334155" Margin="14,8" IsVisible="{Binding IsProjectOpen}"/>
+                    <Button Classes="nav" Content="⚙ 設定" Click="OnSettingsClick"/>
+                </StackPanel>
+
+                <!-- Main navigation (top section) -->
+                <ScrollViewer>
+                    <StackPanel Spacing="2" Margin="0,6,0,0">
+
+                        <!-- (プロジェクト未選択時の「作る」ボタンはサイドバーから外し、Welcome 本文の
+                             ボタンに集約。) -->
+
+                        <!-- Project open: dashboard / monthly reports -->
+                        <StackPanel Spacing="2" IsVisible="{Binding IsProjectOpen}">
+                            <Button Classes="nav" Content="▤ ダッシュボード" Command="{Binding OpenDashboardCommand}"/>
+
+                            <TextBlock Text="月次レポート" Foreground="#64748B" FontSize="11"
+                                       Margin="16,12,0,4" FontWeight="SemiBold"/>
+                            <ItemsControl ItemsSource="{Binding CurrentProject.Months}" x:CompileBindings="False">
+                                <ItemsControl.ItemTemplate>
+                                    <DataTemplate>
+                                        <Button Classes="month" Content="{Binding}"
+                                                Command="{Binding DataContext.OpenMonthlyReportCommand, RelativeSource={RelativeSource AncestorType=Window}}"
+                                                CommandParameter="{Binding}"/>
+                                    </DataTemplate>
+                                </ItemsControl.ItemTemplate>
+                            </ItemsControl>
+                        </StackPanel>
+                    </StackPanel>
+                </ScrollViewer>
+            </DockPanel>
+        </Border>
+
+        <!-- ===== Content pane ===== -->
+        <Border Grid.Column="1" Background="#F1F5F9">
+            <ContentControl Content="{Binding CurrentPage}"/>
+        </Border>
+    </Grid>
+</Window>
