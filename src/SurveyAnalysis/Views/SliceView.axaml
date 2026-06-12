@@ -94,6 +94,24 @@
                                     </DataTemplate>
                                 </ItemsControl.ItemTemplate>
                             </ItemsControl>
+                            <!-- 全体 row: 平均は全体平均、その他は全体件数 -->
+                            <Border BorderBrush="#CBD5E1" BorderThickness="0,1,0,0" Margin="6,2,0,0"
+                                    Padding="0,6,0,0" IsVisible="{Binding HasTotal}">
+                                <StackPanel Orientation="Horizontal" DataContext="{Binding TotalRow}" x:CompileBindings="False">
+                                    <TextBlock Text="{Binding Label}" Width="170" FontSize="13"
+                                               FontWeight="SemiBold" Foreground="#334155"/>
+                                    <ItemsControl ItemsSource="{Binding Cells}">
+                                        <ItemsControl.ItemsPanel>
+                                            <ItemsPanelTemplate><StackPanel Orientation="Horizontal"/></ItemsPanelTemplate>
+                                        </ItemsControl.ItemsPanel>
+                                        <ItemsControl.ItemTemplate>
+                                            <DataTemplate>
+                                                <TextBlock Classes="cell" FontWeight="SemiBold" Text="{Binding}"/>
+                                            </DataTemplate>
+                                        </ItemsControl.ItemTemplate>
+                                    </ItemsControl>
+                                </StackPanel>
+                            </Border>
                         </StackPanel>
                     </ScrollViewer>
                 </StackPanel>

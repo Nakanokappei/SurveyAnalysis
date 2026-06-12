@@ -26,6 +26,12 @@ public partial class SliceViewModel : PeriodScopedViewModel
     public ObservableCollection<AnalysisRow> Rows { get; } = new();
 
     [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(HasTotal))]
+    private AnalysisRow? _totalRow;
+
+    public bool HasTotal => TotalRow is not null;
+
+    [ObservableProperty]
     private bool _hasData;
 
     [ObservableProperty]
@@ -49,8 +55,13 @@ public partial class SliceViewModel : PeriodScopedViewModel
             _ => ""
         };
 
+        // The grouping field (都道府県/住所/市区町村 for 地域, the topic field for トピック) is the rows,
+        // so it is not also shown as a column.
+        var groupingField = kind == SliceKind.Topic
+            ? AnalyticsRepository.TopicField(project)
+            : AnalyticsRepository.RegionField(project);
         Columns = project.Fields
-            .Where(f => !string.IsNullOrWhiteSpace(f.Name))
+            .Where(f => !string.IsNullOrWhiteSpace(f.Name) && f.Name != groupingField)
             .Select(f => new AnalysisColumn(f.Name, FieldAggregationInfo.For(f)))
             .ToList();
 
@@ -64,15 +75,16 @@ public partial class SliceViewModel : PeriodScopedViewModel
     protected override void Reload()
     {
         var (from, to) = Window;
-        var rows = _analytics.AggregateRows(_projectId, _grouping, TimeScope.Root, from, to, Columns);
+        var table = _analytics.AggregateRows(_projectId, _grouping, TimeScope.Root, from, to, Columns);
 
         Rows.Clear();
-        foreach (var row in rows)
+        foreach (var row in table.Rows)
             Rows.Add(row);
+        TotalRow = table.Rows.Count > 0 ? table.Total : null;
 
-        var total = rows.Sum(r => r.Count);
-        CountSummary = $"合計 {total} 件 ・ {rows.Count} グループ";
-        HasData = rows.Count > 0;
+        var total = table.Rows.Sum(r => r.Count);
+        CountSummary = $"合計 {total} 件 ・ {table.Rows.Count} グループ";
+        HasData = table.Rows.Count > 0;
         EmptyMessage = HasData ? "" : "この集計期間には回答がありません。右上の集計期間を広げてください。";
     }
 }

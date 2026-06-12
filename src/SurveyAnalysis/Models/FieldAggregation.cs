@@ -52,6 +52,11 @@ public sealed record AnalysisColumn(string Name, FieldAggregation Aggregation)
 // dimension — the scope to open when the row is clicked.
 public sealed record AnalysisRow(string Label, IReadOnlyList<string> Cells, int Count, TimeScope? ChildScope);
 
+// The full analysis table: the per-group rows plus a 全体 total row. In the total row, 平均/感情平均
+// columns show the overall average across all responses; every other column shows the total response
+// count (全体の件数).
+public sealed record AnalysisTable(IReadOnlyList<AnalysisRow> Rows, AnalysisRow Total);
+
 // Which dimension the rows are grouped by. Time also carries a drill scope; the others are flat.
 public enum AnalysisGrouping
 {

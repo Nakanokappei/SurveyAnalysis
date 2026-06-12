@@ -30,6 +30,12 @@ public partial class WeekdaySliceViewModel : PeriodScopedViewModel
     public ObservableCollection<Crumb> Breadcrumbs { get; } = new();
 
     [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(HasTotal))]
+    private AnalysisRow? _totalRow;
+
+    public bool HasTotal => TotalRow is not null;
+
+    [ObservableProperty]
     private string _countSummary = "";
 
     [ObservableProperty]
@@ -52,12 +58,13 @@ public partial class WeekdaySliceViewModel : PeriodScopedViewModel
     {
         _analytics = analytics;
         _projectId = project.Id;
+        _dateFieldName = AnalyticsRepository.DateField(project);
+        // The time basis is the rows (曜日), so the date field is not also shown as a column.
         Columns = project.Fields
-            .Where(f => !string.IsNullOrWhiteSpace(f.Name))
+            .Where(f => !string.IsNullOrWhiteSpace(f.Name) && f.Name != _dateFieldName)
             .Select(f => new AnalysisColumn(f.Name, FieldAggregationInfo.For(f)))
             .ToList();
 
-        _dateFieldName = AnalyticsRepository.DateField(project);
         _excerptFieldName =
             project.Fields.FirstOrDefault(f => f.FieldType == FieldType.FreeText)?.Name
             ?? project.Fields.FirstOrDefault(f => f.Analysis == AnalysisMethod.Sentiment)?.Name;
@@ -102,24 +109,26 @@ public partial class WeekdaySliceViewModel : PeriodScopedViewModel
 
         IsResponseView = false;
         var (from, to) = Window;
-        var rows = _analytics.AggregateRows(_projectId, AnalysisGrouping.Weekday, TimeScope.Root, from, to, Columns);
+        var table = _analytics.AggregateRows(_projectId, AnalysisGrouping.Weekday, TimeScope.Root, from, to, Columns);
 
         Rows.Clear();
-        foreach (var row in rows)
+        foreach (var row in table.Rows)
             Rows.Add(row);
+        TotalRow = table.Rows.Count > 0 ? table.Total : null;
 
         Breadcrumbs.Clear();
         Breadcrumbs.Add(new Crumb("曜日", 0));
 
-        var total = rows.Sum(r => r.Count);
+        var total = table.Rows.Sum(r => r.Count);
         CountSummary = $"合計 {total} 件";
-        HasData = rows.Count > 0;
+        HasData = table.Rows.Count > 0;
         EmptyMessage = HasData ? "" : "この集計期間には回答がありません。右上の集計期間を広げてください。";
     }
 
     private void ShowResponsesFor(int dayOfWeek, string label)
     {
         var (from, to) = Window;
+        TotalRow = null; // the 個票 list has no column table
         Responses.Clear();
         foreach (var response in _analytics.ResponsesForWeekday(_projectId, dayOfWeek, from, to))
             Responses.Add(ResponseRowFactory.Build(_dateFieldName, _excerptFieldName, response));

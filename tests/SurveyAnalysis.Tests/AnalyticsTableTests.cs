@@ -60,14 +60,19 @@ public class AnalyticsTableTests
         using var _ = temp;
 
         // 全期間 → grouped by 年度: all three May-2026 responses fall in 2026年度.
-        var rows = analytics.AggregateRows(pid, AnalysisGrouping.Time, TimeScope.Root, null, null, columns);
-        var year = rows.Single();
+        var table = analytics.AggregateRows(pid, AnalysisGrouping.Time, TimeScope.Root, null, null, columns);
+        var year = table.Rows.Single();
 
         Assert.Equal("2026年度", year.Label);
         Assert.Equal(3, year.Count);
         // 記入日=種類数(3 distinct dates), 都道府県=種類数(東京都/大阪府=2), 評価=合計(3+5+2=10),
         // 満足度=平均((4+2+5)/3=3.7), ご意見=感情平均(no LLM score yet → —).
         Assert.Equal(new[] { "3", "2", "10", "3.7", "—" }, year.Cells);
+
+        // 全体 row: 平均 columns show the overall average; every other column shows the total 件数 (3).
+        Assert.Equal("全体", table.Total.Label);
+        Assert.Equal(3, table.Total.Count);
+        Assert.Equal(new[] { "3", "3", "3", "3.7", "—" }, table.Total.Cells);
     }
 
     [Fact]
@@ -76,8 +81,8 @@ public class AnalyticsTableTests
         var (temp, analytics, pid, columns) = Seed();
         using var _ = temp;
 
-        var rows = analytics.AggregateRows(pid, AnalysisGrouping.Region, TimeScope.Root, null, null, columns);
-        var tokyo = rows.Single(r => r.Label == "東京都");
+        var table = analytics.AggregateRows(pid, AnalysisGrouping.Region, TimeScope.Root, null, null, columns);
+        var tokyo = table.Rows.Single(r => r.Label == "東京都");
 
         // 東京都 has two responses (05/11 評価3, 05/18 評価2): 都道府県種類数=1, 評価合計=5, 満足度平均=(4+5)/2=4.5.
         Assert.Equal(2, tokyo.Count);

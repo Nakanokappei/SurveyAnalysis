@@ -299,7 +299,7 @@ public sealed class AnalyticsRepository
     // produces one formatted cell using that field's aggregation (種類数 / 合計 / 平均 / 感情平均). For the
     // time dimension each row also carries the scope to drill into. Aggregation is done in memory over
     // the joined answer rows — the data is small and this keeps the per-field logic in one place.
-    public IReadOnlyList<AnalysisRow> AggregateRows(
+    public AnalysisTable AggregateRows(
         long projectId, AnalysisGrouping grouping, TimeScope scope,
         long? fromKey, long? toKey, IReadOnlyList<AnalysisColumn> columns)
     {
@@ -346,6 +346,7 @@ public sealed class AnalyticsRepository
         };
 
         var groups = new Dictionary<string, Group>();
+        var grand = new Group("全体", null, 0); // every response also folds into the total row
         using (var reader = command.ExecuteReader())
         {
             while (reader.Read())
@@ -357,6 +358,7 @@ public sealed class AnalyticsRepository
                 var rid = reader.GetInt64(reader.GetOrdinal("rid"));
                 var sentiment = reader.IsDBNull(reader.GetOrdinal("sscore")) ? (double?)null : reader.GetDouble(reader.GetOrdinal("sscore"));
                 group.Sentiment[rid] = sentiment;
+                grand.Sentiment[rid] = sentiment;
 
                 var fnameOrdinal = reader.GetOrdinal("fname");
                 if (!reader.IsDBNull(fnameOrdinal))
@@ -364,6 +366,7 @@ public sealed class AnalyticsRepository
                     var field = reader.GetString(fnameOrdinal);
                     var value = reader.IsDBNull(reader.GetOrdinal("val")) ? "" : reader.GetString(reader.GetOrdinal("val"));
                     group.AddAnswer(field, value);
+                    grand.AddAnswer(field, value);
                 }
             }
         }
@@ -376,9 +379,18 @@ public sealed class AnalyticsRepository
             _ => groups.Values.OrderByDescending(g => g.SortKey),
         };
 
-        return ordered
+        var rows = ordered
             .Select(g => new AnalysisRow(g.Label, columns.Select(c => g.Cell(c)).ToList(), g.Sentiment.Count, g.Child))
             .ToList();
+
+        // 全体 row: averages show the overall average; every other column shows the total 件数.
+        var totalCount = grand.Sentiment.Count;
+        var totalCells = columns
+            .Select(c => c.Aggregation is FieldAggregation.Average or FieldAggregation.SentimentAverage
+                ? grand.Cell(c)
+                : totalCount.ToString())
+            .ToList();
+        return new AnalysisTable(rows, new AnalysisRow("全体", totalCells, totalCount, null));
     }
 
     // Extracts a group's identity (dedupe key, display label, drill scope, sort key) from a raw row.

@@ -33,6 +33,13 @@ public partial class TimeSliceViewModel : PeriodScopedViewModel
     // The individual responses, shown only at the 日 terminal.
     public ObservableCollection<SurveyRow> Responses { get; } = new();
 
+    // The 全体 total row (null at the 個票 terminal, which has no column table).
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(HasTotal))]
+    private AnalysisRow? _totalRow;
+
+    public bool HasTotal => TotalRow is not null;
+
     // Clickable breadcrumb segments (全期間 ＞ 2026年度 ＞ …); clicking one returns to that depth.
     public ObservableCollection<Crumb> Breadcrumbs { get; } = new();
 
@@ -68,14 +75,15 @@ public partial class TimeSliceViewModel : PeriodScopedViewModel
     {
         _analytics = analytics;
         _projectId = project.Id;
-        Columns = project.Fields
-            .Where(f => !string.IsNullOrWhiteSpace(f.Name))
-            .Select(f => new AnalysisColumn(f.Name, FieldAggregationInfo.For(f)))
-            .ToList();
 
         // The aggregation date field drives the hierarchy; the excerpt comes from a free-text (or
         // sentiment) field — never from a personal-information field.
         _dateFieldName = AnalyticsRepository.DateField(project);
+        // The grouping field (the time basis) is the rows, so it is not also shown as a column.
+        Columns = project.Fields
+            .Where(f => !string.IsNullOrWhiteSpace(f.Name) && f.Name != _dateFieldName)
+            .Select(f => new AnalysisColumn(f.Name, FieldAggregationInfo.For(f)))
+            .ToList();
         _excerptFieldName =
             project.Fields.FirstOrDefault(f => f.FieldType == FieldType.FreeText)?.Name
             ?? project.Fields.FirstOrDefault(f => f.Analysis == AnalysisMethod.Sentiment)?.Name;
@@ -152,6 +160,7 @@ public partial class TimeSliceViewModel : PeriodScopedViewModel
 
         if (IsTerminal)
         {
+            TotalRow = null;
             foreach (var response in _analytics.ResponsesForScope(_projectId, scope, from, to))
                 Responses.Add(ResponseRowFactory.Build(_dateFieldName, _excerptFieldName, response));
             ChildLevelTitle = "回答一覧";
@@ -161,14 +170,15 @@ public partial class TimeSliceViewModel : PeriodScopedViewModel
             return;
         }
 
-        var rows = _analytics.AggregateRows(_projectId, AnalysisGrouping.Time, scope, from, to, Columns);
-        foreach (var row in rows)
+        var table = _analytics.AggregateRows(_projectId, AnalysisGrouping.Time, scope, from, to, Columns);
+        foreach (var row in table.Rows)
             Rows.Add(row);
+        TotalRow = table.Rows.Count > 0 ? table.Total : null;
 
-        var total = rows.Sum(r => r.Count);
+        var total = table.Rows.Sum(r => r.Count);
         ChildLevelTitle = ChildLevelName(scope.Depth);
-        ScopeSummary = $"合計 {total} 件 ・ {rows.Count} グループ";
-        HasData = rows.Count > 0;
+        ScopeSummary = $"合計 {total} 件 ・ {table.Rows.Count} グループ";
+        HasData = table.Rows.Count > 0;
         EmptyMessage = HasData
             ? ""
             : "この集計期間には回答がありません。右上の集計期間を広げるか、「インポート (CSV)」から取り込めます。";
