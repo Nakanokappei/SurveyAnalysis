@@ -1,0 +1,28 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!-- The production Windows front end: a WinForms app over the shared SurveyAnalysis.Core brains.
+       Targets net8.0-windows. WinForms normally needs the Windows Desktop SDK (UseWindowsForms),
+       which is absent on macOS; EnableWindowsTargeting + a direct FrameworkReference let the project
+       compile and cross-publish (dotnet publish -r win-x64) from this Mac. It can only be RUN on
+       Windows (verified in Parallels), since WinForms draws via Win32/USER32. -->
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net8.0-windows</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <EnableWindowsTargeting>true</EnableWindowsTargeting>
+    <RootNamespace>SurveyAnalysis.WinForms</RootNamespace>
+    <AssemblyName>SurveyAnalysis</AssemblyName>
+  </PropertyGroup>
+
+  <!-- UseWindowsForms requires the Windows Desktop SDK (not on macOS); reference the framework
+       directly instead, the same way the sibling Window Resize project builds on this Mac. -->
+  <ItemGroup>
+    <FrameworkReference Include="Microsoft.WindowsDesktop.App.WindowsForms" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\SurveyAnalysis.Core\SurveyAnalysis.Core.csproj" />
+  </ItemGroup>
+
+</Project>

@@ -3,6 +3,7 @@ bin/
 obj/
 [Pp]ublish/
 publish-osx/
+publish-win/
 *.user
 *.suo
 project.lock.json
