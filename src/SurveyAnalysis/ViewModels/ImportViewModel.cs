@@ -18,6 +18,7 @@ public partial class ImportViewModel : ViewModelBase
 
     private readonly Project _project;
     private readonly ResponseRepository _responses;
+    private readonly AnalyticsRepository _analytics;
 
     [ObservableProperty]
     private string _selectedFile = "（CSVファイル未選択）";
@@ -48,10 +49,11 @@ public partial class ImportViewModel : ViewModelBase
     // 「3 / 10」のような位置表示。
     public string RowPosition => _rows.Count == 0 ? "0 / 0" : $"{CurrentIndex + 1} / {_rows.Count}";
 
-    public ImportViewModel(Project project, ResponseRepository responses)
+    public ImportViewModel(Project project, ResponseRepository responses, AnalyticsRepository analytics)
     {
         _project = project;
         _responses = responses;
+        _analytics = analytics;
 
         // 対応づけ候補は「取り込まない」＋プロジェクトの項目名。自動マッピングはしない（誤割り当て防止）。
         MappingOptions = new ObservableCollection<string> { NoMapping };
@@ -162,6 +164,12 @@ public partial class ImportViewModel : ViewModelBase
         }
 
         _responses.InsertResponses(_project.Id, _source, responses);
+
+        // Refresh the analytics star immediately so the time/region/topic slices reflect the new
+        // rows without waiting for a slice to be opened. Rebuild is idempotent (clears then rebuilds
+        // this project's facts), so re-importing simply recomputes the dimensions and facts.
+        _analytics.Rebuild(_project);
+
         var total = _responses.CountForProject(_project.Id);
         StatusMessage = $"{responses.Count} 件をマージしました（このプロジェクトの回答数：{total} 件）。";
     }
