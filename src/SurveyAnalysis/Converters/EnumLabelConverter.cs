@@ -5,7 +5,7 @@ using SurveyAnalysis.Models;
 
 namespace SurveyAnalysis.Converters;
 
-// Converts a FieldType / AnalysisMethod enum value to its Japanese UI label so combo
+// Converts a FieldType / AnalysisMethod / TimeGrain enum value to its Japanese UI label so combo
 // boxes and read-outs show wording that matches the rest of the screen.
 public class EnumLabelConverter : IValueConverter
 {
@@ -13,6 +13,7 @@ public class EnumLabelConverter : IValueConverter
     {
         FieldType fieldType => FieldTypeInfo.Label(fieldType),
         AnalysisMethod analysis => FieldTypeInfo.Label(analysis),
+        TimeGrain grain => TimeGrainInfo.Label(grain),
         _ => value?.ToString()
     };
 

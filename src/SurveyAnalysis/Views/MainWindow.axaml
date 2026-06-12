@@ -1,6 +1,7 @@
 <Window xmlns="https://github.com/avaloniaui"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         xmlns:vm="using:SurveyAnalysis.ViewModels"
+        xmlns:models="using:SurveyAnalysis.Models"
         xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
         xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
         mc:Ignorable="d" d:DesignWidth="1165" d:DesignHeight="720"
@@ -26,20 +27,6 @@
             <Setter Property="FontSize" Value="14"/>
         </Style>
         <Style Selector="Button.nav:pointerover /template/ ContentPresenter">
-            <Setter Property="Background" Value="#334155"/>
-            <Setter Property="Foreground" Value="White"/>
-        </Style>
-        <Style Selector="Button.month">
-            <Setter Property="HorizontalAlignment" Value="Stretch"/>
-            <Setter Property="HorizontalContentAlignment" Value="Left"/>
-            <Setter Property="Padding" Value="26,7"/>
-            <Setter Property="Margin" Value="8,1"/>
-            <Setter Property="Background" Value="Transparent"/>
-            <Setter Property="Foreground" Value="#CBD5E1"/>
-            <Setter Property="CornerRadius" Value="8"/>
-            <Setter Property="FontSize" Value="13"/>
-        </Style>
-        <Style Selector="Button.month:pointerover /template/ ContentPresenter">
             <Setter Property="Background" Value="#334155"/>
             <Setter Property="Foreground" Value="White"/>
         </Style>
@@ -82,17 +69,14 @@
                             <Button Classes="nav" Content="▤ ダッシュボード" Command="{Binding OpenDashboardCommand}"/>
                             <Button Classes="nav" Content="✎ データ項目" Command="{Binding EditSchemaCommand}"/>
 
-                            <TextBlock Text="月次レポート" Foreground="#64748B" FontSize="11"
+                            <TextBlock Text="切り口" Foreground="#64748B" FontSize="11"
                                        Margin="16,12,0,4" FontWeight="SemiBold"/>
-                            <ItemsControl ItemsSource="{Binding CurrentProject.Months}" x:CompileBindings="False">
-                                <ItemsControl.ItemTemplate>
-                                    <DataTemplate>
-                                        <Button Classes="month" Content="{Binding}"
-                                                Command="{Binding DataContext.OpenMonthlyReportCommand, RelativeSource={RelativeSource AncestorType=Window}}"
-                                                CommandParameter="{Binding}"/>
-                                    </DataTemplate>
-                                </ItemsControl.ItemTemplate>
-                            </ItemsControl>
+                            <Button Classes="nav" Content="▸ 時間別" Command="{Binding OpenSliceCommand}"
+                                    CommandParameter="{x:Static models:SliceKind.Time}"/>
+                            <Button Classes="nav" Content="▸ 地域別" Command="{Binding OpenSliceCommand}"
+                                    CommandParameter="{x:Static models:SliceKind.Region}"/>
+                            <Button Classes="nav" Content="▸ トピック別" Command="{Binding OpenSliceCommand}"
+                                    CommandParameter="{x:Static models:SliceKind.Topic}"/>
                         </StackPanel>
                     </StackPanel>
                 </ScrollViewer>

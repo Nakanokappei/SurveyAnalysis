@@ -35,19 +35,21 @@ public partial class MainWindowViewModel : ViewModelBase
     private readonly ProjectRepository _projects;
     private readonly SettingsRepository _settings;
     private readonly ResponseRepository _responses;
+    private readonly AnalyticsRepository _analytics;
 
-    public MainWindowViewModel(ProjectRepository projects, SettingsRepository settings, ResponseRepository responses)
+    public MainWindowViewModel(ProjectRepository projects, SettingsRepository settings, ResponseRepository responses, AnalyticsRepository analytics)
     {
         _projects = projects;
         _settings = settings;
         _responses = responses;
+        _analytics = analytics;
         // Start with no project open: the welcome page and the "プロジェクトを作る" CTA.
         _currentPage = new WelcomeViewModel(this);
     }
 
     // Parameterless overload for the XAML design-time DataContext; routes to the same repositories
     // the running app uses (see AppServices). Not used by the live app.
-    public MainWindowViewModel() : this(AppServices.Projects, AppServices.Settings, AppServices.Responses) { }
+    public MainWindowViewModel() : this(AppServices.Projects, AppServices.Settings, AppServices.Responses, AppServices.Analytics) { }
 
     // Saved projects for the welcome screen's reopen list.
     public IReadOnlyList<Models.ProjectSummary> GetProjectSummaries() => _projects.ListSummaries();
@@ -116,12 +118,12 @@ public partial class MainWindowViewModel : ViewModelBase
             CurrentPage = new DashboardViewModel(project, _responses, project.Months[0]);
     }
 
-    // 月次レポート（サイドメニューの月リンク）
+    // 切り口（時間別 / 地域別 / トピック別）をスタースキーマから集計して表示。
     [RelayCommand]
-    private void OpenMonthlyReport(string month)
+    private void OpenSlice(SliceKind kind)
     {
         if (CurrentProject is { } project)
-            CurrentPage = new MonthlyReportViewModel(project, month);
+            CurrentPage = new SliceViewModel(project, _analytics, kind);
     }
 
     // インポート（モーダルダイアログでCSVをマージ）
