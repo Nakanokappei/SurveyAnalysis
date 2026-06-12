@@ -4,9 +4,10 @@ using System.Text;
 
 namespace SurveyAnalysis.Data;
 
-// Reads CSV bytes into a header row and data rows. Handles the encodings common in Japanese survey
-// exports (UTF-8 with/without BOM, UTF-16, and Shift-JIS/CP932 from Excel) and RFC-4180 quoting
-// (commas, doubled quotes "", and newlines inside quoted fields).
+// Reads CSV/TSV bytes into a header row and data rows. Handles the encodings common in Japanese
+// survey exports (UTF-8 with/without BOM, UTF-16, and Shift-JIS/CP932 from Excel), auto-detects the
+// delimiter from the header (comma / tab / semicolon — Excel's 「テキスト(タブ区切り)」 saves TSV), and
+// follows RFC-4180 quoting (the delimiter, doubled quotes "", and newlines inside quoted fields).
 public sealed class CsvFile
 {
     public IReadOnlyList<string> Header { get; }
@@ -22,7 +23,8 @@ public sealed class CsvFile
     // Entirely blank lines are skipped.
     public static CsvFile Parse(byte[] bytes)
     {
-        var records = ParseRecords(Decode(bytes));
+        var text = Decode(bytes);
+        var records = ParseRecords(text, DetectDelimiter(text));
         if (records.Count == 0)
             return new CsvFile(Array.Empty<string>(), Array.Empty<string[]>());
 
@@ -63,9 +65,30 @@ public sealed class CsvFile
         }
     }
 
-    // RFC-4180 record splitter: walks the text once, respecting quoted fields (which may contain
-    // commas, doubled quotes, and newlines). Returns one string[] per non-blank record.
-    private static List<string[]> ParseRecords(string text)
+    // Picks the delimiter from the header line: whichever of comma / tab / semicolon occurs most often
+    // outside quotes in the first record. Defaults to comma when the header has none (single column).
+    private static char DetectDelimiter(string text)
+    {
+        int comma = 0, tab = 0, semicolon = 0;
+        var inQuotes = false;
+        foreach (var c in text)
+        {
+            if (c == '"') { inQuotes = !inQuotes; continue; }
+            if (inQuotes) continue;
+            if (c == '\n' || c == '\r') break; // only the first line decides
+            if (c == ',') comma++;
+            else if (c == '\t') tab++;
+            else if (c == ';') semicolon++;
+        }
+        if (tab > comma && tab >= semicolon) return '\t';
+        if (semicolon > comma && semicolon > tab) return ';';
+        return ',';
+    }
+
+    // RFC-4180 record splitter: walks the text once with the chosen delimiter, respecting quoted
+    // fields (which may contain the delimiter, doubled quotes, and newlines). Returns one string[]
+    // per non-blank record.
+    private static List<string[]> ParseRecords(string text, char delimiter)
     {
         var records = new List<string[]>();
         var fields = new List<string>();
@@ -104,24 +127,27 @@ public sealed class CsvFile
                 field.Append(c); i++; continue;
             }
 
-            switch (c)
+            // The delimiter is a variable, so this is an if-chain rather than a switch on a constant.
+            if (c == delimiter)
             {
-                case '"':
-                    inQuotes = true; sawAnyChar = true; i++;
-                    break;
-                case ',':
-                    fields.Add(field.ToString()); field.Clear(); sawAnyChar = true; i++;
-                    break;
-                case '\r':
-                    EndRecord();
-                    i += (i + 1 < text.Length && text[i + 1] == '\n') ? 2 : 1;
-                    break;
-                case '\n':
-                    EndRecord(); i++;
-                    break;
-                default:
-                    field.Append(c); sawAnyChar = true; i++;
-                    break;
+                fields.Add(field.ToString()); field.Clear(); sawAnyChar = true; i++;
+            }
+            else if (c == '"')
+            {
+                inQuotes = true; sawAnyChar = true; i++;
+            }
+            else if (c == '\r')
+            {
+                EndRecord();
+                i += (i + 1 < text.Length && text[i + 1] == '\n') ? 2 : 1;
+            }
+            else if (c == '\n')
+            {
+                EndRecord(); i++;
+            }
+            else
+            {
+                field.Append(c); sawAnyChar = true; i++;
             }
         }
 

@@ -19,11 +19,17 @@ public partial class ImportView : UserControl
 
         var files = await topLevel.StorageProvider.OpenFilePickerAsync(new FilePickerOpenOptions
         {
-            Title = "CSVファイルを選択",
+            Title = "CSV / TSV ファイルを選択",
             AllowMultiple = false,
             FileTypeFilter = new[]
             {
-                new FilePickerFileType("CSV") { Patterns = new[] { "*.csv" }, MimeTypes = new[] { "text/csv" } },
+                // CSV (comma), TSV (tab — Excel の「テキスト(タブ区切り)」), and plain .txt exports.
+                // The delimiter is auto-detected on parse (see CsvFile), so all share one filter.
+                new FilePickerFileType("CSV / TSV / テキスト")
+                {
+                    Patterns = new[] { "*.csv", "*.tsv", "*.txt" },
+                    MimeTypes = new[] { "text/csv", "text/tab-separated-values", "text/plain" },
+                },
             },
         });
 
