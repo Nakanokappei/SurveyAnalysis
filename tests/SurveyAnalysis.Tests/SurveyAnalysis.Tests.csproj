@@ -14,7 +14,7 @@
   </ItemGroup>
 
   <ItemGroup>
-    <ProjectReference Include="..\..\src\SurveyAnalysis\SurveyAnalysis.csproj" />
+    <ProjectReference Include="..\..\src\SurveyAnalysis.Core\SurveyAnalysis.Core.csproj" />
   </ItemGroup>
 
 </Project>

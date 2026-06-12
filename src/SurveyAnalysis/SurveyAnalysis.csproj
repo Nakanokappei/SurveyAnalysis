@@ -21,12 +21,12 @@
       <IncludeAssets Condition="'$(Configuration)' != 'Debug'">None</IncludeAssets>
       <PrivateAssets Condition="'$(Configuration)' != 'Debug'">All</PrivateAssets>
     </PackageReference>
-    <PackageReference Include="CommunityToolkit.Mvvm" Version="8.4.1" />
-    <!-- Local persistence: bundled SQLite (the native engine ships with this package, so the
-         self-contained osx/win publish carries it). DPAPI protects secret settings on Windows. -->
-    <PackageReference Include="Microsoft.Data.Sqlite" Version="8.0.10" />
-    <PackageReference Include="System.Security.Cryptography.ProtectedData" Version="8.0.0" />
-    <!-- CP932/Shift-JIS support for CSV imports (Excel on Japanese Windows exports CP932). -->
-    <PackageReference Include="System.Text.Encoding.CodePages" Version="8.0.0" />
+  </ItemGroup>
+
+  <!-- The domain/persistence/view-model layer now lives in SurveyAnalysis.Core (net8.0). Its package
+       references (CommunityToolkit.Mvvm, Microsoft.Data.Sqlite, ProtectedData, CodePages) flow in
+       transitively, so they are no longer listed here. -->
+  <ItemGroup>
+    <ProjectReference Include="..\SurveyAnalysis.Core\SurveyAnalysis.Core.csproj" />
   </ItemGroup>
 </Project>

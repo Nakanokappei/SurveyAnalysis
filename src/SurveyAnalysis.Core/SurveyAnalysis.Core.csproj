@@ -1,0 +1,24 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!-- The framework-agnostic brains of the app: domain models, SQLite persistence, CSV import, the
+       analytics star, and the MVVM view models. Targets plain net8.0 (no OS suffix) so it builds and
+       runs anywhere, and is shared by every UI front end (the WinForms app and, until it is retired,
+       the Avalonia preview app) and by the test project. The view models depend only on
+       CommunityToolkit.Mvvm, never on a UI toolkit, so a WinForms Form can bind them via a
+       BindingSource exactly as Avalonia did via XAML bindings. -->
+  <PropertyGroup>
+    <TargetFramework>net8.0</TargetFramework>
+    <Nullable>enable</Nullable>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="CommunityToolkit.Mvvm" Version="8.4.1" />
+    <!-- Local persistence: bundled SQLite (the native engine ships with this package). -->
+    <PackageReference Include="Microsoft.Data.Sqlite" Version="8.0.10" />
+    <!-- DPAPI protects secret settings on Windows; a no-op fallback elsewhere. -->
+    <PackageReference Include="System.Security.Cryptography.ProtectedData" Version="8.0.0" />
+    <!-- CP932/Shift-JIS support for CSV imports (Excel on Japanese Windows exports CP932). -->
+    <PackageReference Include="System.Text.Encoding.CodePages" Version="8.0.0" />
+  </ItemGroup>
+
+</Project>
