@@ -38,7 +38,7 @@ public sealed class MainForm : Form
         // import and settings dialogs are migrated in a following step (placeholder notices for now).
         _shell.CreateProjectRequested += OnCreateProject;
         _shell.CreateProjectFromCsvRequested += OnCreateProjectFromCsv;
-        _shell.ImportRequested += _ => ShowPending("インポート (CSV)");
+        _shell.ImportRequested += OnImport;
         _shell.EditSchemaRequested += OnEditSchema;
 
         RebuildSidebar();
@@ -99,7 +99,7 @@ public sealed class MainForm : Form
             bottom.Controls.Add(NavButton("✕ プロジェクトを閉じる", () => _shell.CloseProjectCommand.Execute(null)));
             bottom.Controls.Add(Divider());
         }
-        bottom.Controls.Add(NavButton("⚙ 設定", () => ShowPending("設定")));
+        bottom.Controls.Add(NavButton("⚙ 設定", OnSettings));
 
         // Main navigation fills the space above the bottom actions.
         var nav = new FlowLayoutPanel
@@ -243,6 +243,22 @@ public sealed class MainForm : Form
         using var form = new ProjectDesignForm(vm);
         if (form.ShowDialog(this) == DialogResult.OK && form.ResultProject is { } project && vm.SourceCsv is { } csv)
             _shell.FinishProjectFromCsv(project, csv, Path.GetFileName(picker.FileName));
+    }
+
+    // インポート（モーダル）。CSVを取り込み、回答にマージする。
+    private void OnImport(Project project)
+    {
+        using var form = new ImportForm(new ImportViewModel(project, AppServices.Responses, AppServices.Analytics));
+        form.ShowDialog(this);
+    }
+
+    // 設定（モーダル）。開くときに保存値を読み込み、閉じたら書き戻す。
+    private void OnSettings()
+    {
+        var viewModel = _shell.CreateSettingsViewModel();
+        using var form = new SettingsForm(viewModel);
+        form.ShowDialog(this);
+        viewModel.Save();
     }
 
     // Placeholder for a dialog/screen not yet migrated, so navigation never dead-ends during the port.
