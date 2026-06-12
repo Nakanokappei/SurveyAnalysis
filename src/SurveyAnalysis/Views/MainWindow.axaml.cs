@@ -24,12 +24,14 @@ public partial class MainWindow : Window
         {
             _shell.CreateProjectRequested -= OnCreateProjectRequested;
             _shell.ImportRequested -= OnImportRequested;
+            _shell.EditSchemaRequested -= OnEditSchemaRequested;
         }
         _shell = DataContext as MainWindowViewModel;
         if (_shell is not null)
         {
             _shell.CreateProjectRequested += OnCreateProjectRequested;
             _shell.ImportRequested += OnImportRequested;
+            _shell.EditSchemaRequested += OnEditSchemaRequested;
         }
     }
 
@@ -49,10 +51,24 @@ public partial class MainWindow : Window
         await dialog.ShowDialog(this);
     }
 
-    // 設定（モーダルダイアログ）
+    // データ項目の編集（モーダルダイアログ）。作成ダイアログを編集モードで開き、保存された下書きを
+    // 受け取って永続化する。
+    private async void OnEditSchemaRequested(Project project)
+    {
+        var dialog = new ProjectDesignWindow { DataContext = new ProjectDesignViewModel(project) };
+        var edited = await dialog.ShowDialog<Project?>(this);
+        if (edited is not null)
+            _shell?.ApplySchemaEdit(edited);
+    }
+
+    // 設定（モーダルダイアログ）。開くときに保存値を読み込み、閉じたら書き戻す。
     private async void OnSettingsClick(object? sender, RoutedEventArgs e)
     {
-        var dialog = new SettingsWindow { DataContext = new SettingsViewModel() };
+        if (_shell is null)
+            return;
+        var viewModel = _shell.CreateSettingsViewModel();
+        var dialog = new SettingsWindow { DataContext = viewModel };
         await dialog.ShowDialog(this);
+        viewModel.Save();
     }
 }

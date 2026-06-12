@@ -77,9 +77,10 @@
                         <!-- (プロジェクト未選択時の「作る」ボタンはサイドバーから外し、Welcome 本文の
                              ボタンに集約。) -->
 
-                        <!-- Project open: dashboard / monthly reports -->
+                        <!-- Project open: dashboard / schema / monthly reports -->
                         <StackPanel Spacing="2" IsVisible="{Binding IsProjectOpen}">
                             <Button Classes="nav" Content="▤ ダッシュボード" Command="{Binding OpenDashboardCommand}"/>
+                            <Button Classes="nav" Content="✎ データ項目" Command="{Binding EditSchemaCommand}"/>
 
                             <TextBlock Text="月次レポート" Foreground="#64748B" FontSize="11"
                                        Margin="16,12,0,4" FontWeight="SemiBold"/>

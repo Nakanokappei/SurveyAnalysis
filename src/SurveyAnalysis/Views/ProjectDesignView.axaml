@@ -31,7 +31,7 @@
             <StackPanel Orientation="Horizontal" Spacing="12" HorizontalAlignment="Right">
                 <Button Content="キャンセル" Command="{Binding CancelCommand}"
                         Background="Transparent" Foreground="#475569" Padding="16,9"/>
-                <Button Content="このデータ形式で作成" Command="{Binding CreateProjectCommand}"
+                <Button Content="{Binding ConfirmLabel}" Command="{Binding CreateProjectCommand}"
                         Background="#005FB8" Foreground="White" Padding="18,10" CornerRadius="4" FontWeight="SemiBold"/>
             </StackPanel>
         </Border>

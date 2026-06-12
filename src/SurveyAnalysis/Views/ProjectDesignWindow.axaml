@@ -10,7 +10,7 @@
         Width="890" Height="550"
         CanResize="False"
         WindowStartupLocation="CenterOwner"
-        Title="プロジェクト作成">
+        Title="{Binding DialogTitle}">
 
     <!-- ダイアログ寸法は黄金比（890:550 ≈ 1.618:1）。設定・インポートと統一。 -->
 

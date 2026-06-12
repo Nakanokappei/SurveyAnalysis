@@ -41,15 +41,34 @@ public partial class ProjectDesignViewModel : ViewModelBase
     [ObservableProperty]
     private bool _hasTestResult;
 
+    // Non-null when editing an existing project's schema rather than creating a new one. Drives
+    // the dialog title and the confirm button label, and tells CreateProject to update in place.
+    private readonly Project? _editingProject;
+    public bool IsEditing => _editingProject is not null;
+    public string DialogTitle => IsEditing ? "データ項目の編集" : "プロジェクト作成";
+    public string ConfirmLabel => IsEditing ? "変更を保存" : "このデータ形式で作成";
+
+    // Create mode: seed a few starter rows so the layout is populated.
     public ProjectDesignViewModel()
     {
-        // Re-evaluate the create button whenever the field list or a field name changes.
+        // Re-evaluate the confirm button whenever the field list or a field name changes.
         Fields.CollectionChanged += OnFieldsChanged;
 
-        // Seed with a few starter rows so the layout is populated.
         Fields.Add(new DataField { Name = "氏名", FieldType = FieldType.Name, Analysis = AnalysisMethod.None });
         Fields.Add(new DataField { Name = "記入日", FieldType = FieldType.Date, Analysis = AnalysisMethod.None, UseForAggregation = true });
         Fields.Add(new DataField { Name = "ご意見・ご要望", FieldType = FieldType.FreeText, Analysis = AnalysisMethod.Sentiment });
+    }
+
+    // Edit mode: open an existing project's schema. Fields are cloned so edits stay inside the
+    // dialog until saved — Cancel discards them, and on save the live project is rebuilt from
+    // storage by the host.
+    public ProjectDesignViewModel(Project existing)
+    {
+        _editingProject = existing;
+        Fields.CollectionChanged += OnFieldsChanged;
+        ProjectName = existing.Name;
+        foreach (var field in existing.Fields)
+            Fields.Add(CloneField(field));
     }
 
     // プロジェクト名が変わったら作成可否を再判定
@@ -118,15 +137,28 @@ public partial class ProjectDesignViewModel : ViewModelBase
         HasTestResult = true;
     }
 
-    // このデータ形式でプロジェクトを作成（必須欄が埋まっているときだけ実行可能）
+    // 確定（新規作成または変更保存）。必須欄が埋まっているときだけ実行可能。編集時は既存IDと月ラベルを
+    // 引き継いだ下書きを返し、ホストが保存して開き直す。
     [RelayCommand(CanExecute = nameof(CanCreate))]
     private void CreateProject()
     {
-        var project = new Project { Name = string.IsNullOrWhiteSpace(ProjectName) ? "新しいプロジェクト" : ProjectName };
+        var project = new Project
+        {
+            Id = _editingProject?.Id ?? 0,
+            Name = string.IsNullOrWhiteSpace(ProjectName) ? "新しいプロジェクト" : ProjectName,
+        };
         foreach (var field in Fields)
             project.Fields.Add(field);
-        foreach (var month in new[] { "2026年5月", "2026年4月", "2026年3月" })
-            project.Months.Add(month);
+
+        if (_editingProject is { } existing)
+            // 月ラベルはこのダイアログでは編集しないので、そのまま引き継ぐ。
+            foreach (var month in existing.Months)
+                project.Months.Add(month);
+        else
+            // 新規プロジェクトはプロトタイプのダッシュボード用に仮の月を入れる。
+            foreach (var month in new[] { "2026年5月", "2026年4月", "2026年3月" })
+                project.Months.Add(month);
+
         Completed?.Invoke(project);
     }
 
@@ -154,6 +186,19 @@ public partial class ProjectDesignViewModel : ViewModelBase
         FieldType.PostalCodeOnly => "160-0022",
         FieldType.FreeText => "担当の方が丁寧に説明してくれて安心できました。",
         _ => "（サンプル値）"
+    };
+
+    // Clones a field so the edit dialog works on a detached copy. UseForAggregation is assigned
+    // before UseLoadDateAsDefault so the aggregation→load-date rule does not overwrite the copy.
+    private static DataField CloneField(DataField source) => new()
+    {
+        Name = source.Name,
+        FieldType = source.FieldType,
+        Analysis = source.Analysis,
+        UseForAggregation = source.UseForAggregation,
+        UseLoadDateAsDefault = source.UseLoadDateAsDefault,
+        EnableAlert = source.EnableAlert,
+        AlertThreshold = source.AlertThreshold,
     };
 
     // One row of the test preview table.

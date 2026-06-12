@@ -20,9 +20,10 @@ public partial class App : Application
     {
         if (ApplicationLifetime is IClassicDesktopStyleApplicationLifetime desktop)
         {
+            // AppServices builds the database (and ensures the schema) on first access.
             desktop.MainWindow = new MainWindow
             {
-                DataContext = new MainWindowViewModel(),
+                DataContext = new MainWindowViewModel(AppServices.Projects, AppServices.Settings),
             };
         }
 
