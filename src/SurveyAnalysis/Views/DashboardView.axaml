@@ -56,7 +56,7 @@
                 <Border Classes="card" Grid.Column="1" Margin="8,0,8,0">
                     <StackPanel Spacing="6">
                         <TextBlock Text="ネガティブ件数" Foreground="#64748B" FontSize="13"/>
-                        <TextBlock Text="{Binding NegativeCount}" Foreground="#DC2626" FontSize="30" FontWeight="Bold"/>
+                        <TextBlock Text="{Binding NegativeDisplay}" Foreground="#DC2626" FontSize="30" FontWeight="Bold"/>
                         <TextBlock Text="要対応 / 担当者へ通知対象" Foreground="#94A3B8" FontSize="12"/>
                     </StackPanel>
                 </Border>
@@ -77,7 +77,9 @@
                     <StackPanel Spacing="10">
                         <TextBlock Text="{Binding LevelTitle}" FontSize="15" FontWeight="SemiBold" Foreground="#0F172A"/>
                         <TextBlock Text="棒をクリックすると内訳にドリルダウンします" FontSize="11" Foreground="#94A3B8"
-                                   IsVisible="{Binding !CanDrillUp}"/>
+                                   IsVisible="{Binding ShowDrillHint}"/>
+                        <TextBlock Text="トピック分析は LLM 連携後に表示されます。" FontSize="12" Foreground="#94A3B8"
+                                   TextWrapping="Wrap" IsVisible="{Binding AnalysisPending}"/>
                         <ItemsControl ItemsSource="{Binding TopicBars}" x:CompileBindings="False">
                             <ItemsControl.ItemTemplate>
                                 <DataTemplate>
@@ -105,6 +107,8 @@
                 <Border Classes="card" Grid.Column="1" Margin="9,0,0,0">
                     <StackPanel Spacing="10">
                         <TextBlock Text="感情極性の分布" FontSize="15" FontWeight="SemiBold" Foreground="#0F172A"/>
+                        <TextBlock Text="感情分析は LLM 連携後に表示されます。" FontSize="12" Foreground="#94A3B8"
+                                   TextWrapping="Wrap" IsVisible="{Binding AnalysisPending}"/>
                         <ItemsControl ItemsSource="{Binding SentimentBars}" x:CompileBindings="False">
                             <ItemsControl.ItemTemplate>
                                 <DataTemplate>
@@ -128,10 +132,13 @@
             <Border Classes="card">
                 <StackPanel Spacing="10">
                     <TextBlock Text="回答一覧（抜粋）" FontSize="15" FontWeight="SemiBold" Foreground="#0F172A"/>
+                    <TextBlock Text="まだ回答がありません。サイドバーの「インポート (CSV)」から取り込めます。"
+                               FontSize="13" Foreground="#94A3B8" TextWrapping="Wrap"
+                               IsVisible="{Binding HasNoResponses}"/>
                     <DataGrid ItemsSource="{Binding Rows}" IsReadOnly="True" AutoGenerateColumns="False"
                               GridLinesVisibility="Horizontal" HeadersVisibility="Column" Height="240">
                         <DataGrid.Columns>
-                            <DataGridTextColumn Header="記入日" Binding="{Binding EntryDate}" Width="110"/>
+                            <DataGridTextColumn Header="記入日" Binding="{Binding EntryDate}" Width="130"/>
                             <DataGridTextColumn Header="トピック" Binding="{Binding Topic}" Width="150"/>
                             <DataGridTextColumn Header="感情" Binding="{Binding Sentiment}" Width="90"/>
                             <DataGridTextColumn Header="抜粋（フリーテキスト）" Binding="{Binding Excerpt}" Width="*"/>

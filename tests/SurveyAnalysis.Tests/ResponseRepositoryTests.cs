@@ -59,6 +59,32 @@ public class ResponseRepositoryTests
     }
 
     [Fact]
+    public void LoadForProject_returns_field_value_maps_newest_first()
+    {
+        using var temp = new TempDatabase();
+        var projects = new ProjectRepository(temp.Db);
+        var responses = new ResponseRepository(temp.Db);
+
+        var project = new Project { Name = "P" };
+        project.Fields.Add(new DataField { Name = "記入日", FieldType = FieldType.Date });
+        project.Fields.Add(new DataField { Name = "ご意見", FieldType = FieldType.FreeText });
+        var pid = projects.Insert(project);
+
+        responses.InsertResponses(pid, "t.csv", new[]
+        {
+            Response(("記入日", "2026/05/20"), ("ご意見", "古い")),
+            Response(("記入日", "2026/05/21"), ("ご意見", "新しい")),
+        });
+
+        var loaded = responses.LoadForProject(pid);
+
+        Assert.Equal(2, loaded.Count);
+        Assert.Equal("新しい", loaded[0]["ご意見"]);   // newest (highest id) first
+        Assert.Equal("2026/05/21", loaded[0]["記入日"]);
+        Assert.Equal("古い", loaded[1]["ご意見"]);
+    }
+
+    [Fact]
     public void Responses_are_removed_with_the_project()
     {
         using var temp = new TempDatabase();

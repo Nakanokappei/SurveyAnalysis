@@ -34,18 +34,20 @@ public partial class MainWindowViewModel : ViewModelBase
 
     private readonly ProjectRepository _projects;
     private readonly SettingsRepository _settings;
+    private readonly ResponseRepository _responses;
 
-    public MainWindowViewModel(ProjectRepository projects, SettingsRepository settings)
+    public MainWindowViewModel(ProjectRepository projects, SettingsRepository settings, ResponseRepository responses)
     {
         _projects = projects;
         _settings = settings;
+        _responses = responses;
         // Start with no project open: the welcome page and the "プロジェクトを作る" CTA.
         _currentPage = new WelcomeViewModel(this);
     }
 
     // Parameterless overload for the XAML design-time DataContext; routes to the same repositories
     // the running app uses (see AppServices). Not used by the live app.
-    public MainWindowViewModel() : this(AppServices.Projects, AppServices.Settings) { }
+    public MainWindowViewModel() : this(AppServices.Projects, AppServices.Settings, AppServices.Responses) { }
 
     // Saved projects for the welcome screen's reopen list.
     public IReadOnlyList<Models.ProjectSummary> GetProjectSummaries() => _projects.ListSummaries();
@@ -60,7 +62,7 @@ public partial class MainWindowViewModel : ViewModelBase
         if (_projects.Load(id) is not { } project)
             return;
         CurrentProject = project;
-        CurrentPage = new DashboardViewModel(project, project.Months.Count > 0 ? project.Months[0] : "（今月）");
+        CurrentPage = new DashboardViewModel(project, _responses, project.Months.Count > 0 ? project.Months[0] : "（今月）");
     }
 
     // 新規にプロジェクトを作る → the view shows the modal design dialog.
@@ -73,7 +75,7 @@ public partial class MainWindowViewModel : ViewModelBase
     private void OpenSampleProject()
     {
         CurrentProject = SampleData.CreateSampleProject();
-        CurrentPage = new DashboardViewModel(CurrentProject, CurrentProject.Months[0]);
+        CurrentPage = new DashboardViewModel(CurrentProject, _responses, CurrentProject.Months[0]);
     }
 
     // Called by the design screen when the user confirms the new project: persist it, then open
@@ -84,7 +86,7 @@ public partial class MainWindowViewModel : ViewModelBase
             project.Months.Add("（今月）");
         _projects.Insert(project);
         CurrentProject = project;
-        CurrentPage = new DashboardViewModel(project, project.Months[0]);
+        CurrentPage = new DashboardViewModel(project, _responses, project.Months[0]);
     }
 
     // データ項目（開いているプロジェクトのスキーマを確認・変更するモーダル）
@@ -103,7 +105,7 @@ public partial class MainWindowViewModel : ViewModelBase
         if (_projects.Load(draft.Id) is not { } reloaded)
             return;
         CurrentProject = reloaded;
-        CurrentPage = new DashboardViewModel(reloaded, reloaded.Months.Count > 0 ? reloaded.Months[0] : "（今月）");
+        CurrentPage = new DashboardViewModel(reloaded, _responses, reloaded.Months.Count > 0 ? reloaded.Months[0] : "（今月）");
     }
 
     // ダッシュボード（選択月の集計）
@@ -111,7 +113,7 @@ public partial class MainWindowViewModel : ViewModelBase
     private void OpenDashboard()
     {
         if (CurrentProject is { } project)
-            CurrentPage = new DashboardViewModel(project, project.Months[0]);
+            CurrentPage = new DashboardViewModel(project, _responses, project.Months[0]);
     }
 
     // 月次レポート（サイドメニューの月リンク）

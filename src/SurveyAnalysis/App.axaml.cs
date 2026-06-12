@@ -23,7 +23,7 @@ public partial class App : Application
             // AppServices builds the database (and ensures the schema) on first access.
             desktop.MainWindow = new MainWindow
             {
-                DataContext = new MainWindowViewModel(AppServices.Projects, AppServices.Settings),
+                DataContext = new MainWindowViewModel(AppServices.Projects, AppServices.Settings, AppServices.Responses),
             };
         }
 
