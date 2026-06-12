@@ -30,6 +30,12 @@
             <Setter Property="Background" Value="#334155"/>
             <Setter Property="Foreground" Value="White"/>
         </Style>
+        <!-- Indented sub-menu items (時間別 → 期間 / 曜日) -->
+        <Style Selector="Button.subnav">
+            <Setter Property="Padding" Value="30,8"/>
+            <Setter Property="FontSize" Value="13"/>
+            <Setter Property="Foreground" Value="#CBD5E1"/>
+        </Style>
     </Window.Styles>
 
     <!-- サイドメニュー : メインエリア = 1 : 1.618（黄金比）。star指定で幅に追従。 -->
@@ -71,8 +77,12 @@
 
                             <TextBlock Text="切り口" Foreground="#64748B" FontSize="11"
                                        Margin="16,12,0,4" FontWeight="SemiBold"/>
-                            <Button Classes="nav" Content="▸ 時間別" Command="{Binding OpenSliceCommand}"
-                                    CommandParameter="{x:Static models:SliceKind.Time}"/>
+                            <!-- 時間別 expands into 期間 / 曜日 sub-items -->
+                            <Button Classes="nav" Content="▸ 時間別" Command="{Binding ToggleTimeCommand}"/>
+                            <StackPanel Spacing="2" IsVisible="{Binding IsTimeExpanded}">
+                                <Button Classes="nav subnav" Content="期間" Command="{Binding OpenPeriodCommand}"/>
+                                <Button Classes="nav subnav" Content="曜日" Command="{Binding OpenWeekdayCommand}"/>
+                            </StackPanel>
                             <Button Classes="nav" Content="▸ 地域別" Command="{Binding OpenSliceCommand}"
                                     CommandParameter="{x:Static models:SliceKind.Region}"/>
                             <Button Classes="nav" Content="▸ トピック別" Command="{Binding OpenSliceCommand}"

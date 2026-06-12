@@ -14,6 +14,7 @@ public class EnumLabelConverter : IValueConverter
         FieldType fieldType => FieldTypeInfo.Label(fieldType),
         AnalysisMethod analysis => FieldTypeInfo.Label(analysis),
         TimeGrain grain => TimeGrainInfo.Label(grain),
+        AggregationPeriod period => AggregationPeriodInfo.Label(period),
         _ => value?.ToString()
     };
 

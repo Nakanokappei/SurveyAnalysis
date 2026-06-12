@@ -119,11 +119,35 @@ public partial class MainWindowViewModel : ViewModelBase
     }
 
     // 切り口（時間別 / 地域別 / トピック別）をスタースキーマから集計して表示。
+    // 地域別 / トピック別（フラット集計）。時間別はサブメニュー（期間 / 曜日）に分かれる。
     [RelayCommand]
     private void OpenSlice(SliceKind kind)
     {
         if (CurrentProject is { } project)
             CurrentPage = new SliceViewModel(project, _analytics, kind);
+    }
+
+    // 時間別をサイドメニューで開閉（期間 / 曜日 のサブメニューを出す）。
+    [ObservableProperty]
+    private bool _isTimeExpanded;
+
+    [RelayCommand]
+    private void ToggleTime() => IsTimeExpanded = !IsTimeExpanded;
+
+    // 時間別 → 期間（年度→月→週→日→個票のドリルダウン）
+    [RelayCommand]
+    private void OpenPeriod()
+    {
+        if (CurrentProject is { } project)
+            CurrentPage = new TimeSliceViewModel(project, _analytics);
+    }
+
+    // 時間別 → 曜日（曜日別の集計）
+    [RelayCommand]
+    private void OpenWeekday()
+    {
+        if (CurrentProject is { } project)
+            CurrentPage = new WeekdaySliceViewModel(project, _analytics);
     }
 
     // インポート（モーダルダイアログでCSVをマージ）
