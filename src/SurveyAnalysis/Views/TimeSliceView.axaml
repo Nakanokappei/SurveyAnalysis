@@ -144,7 +144,7 @@
                                     </DataTemplate>
                                 </ItemsControl.ItemTemplate>
                             </ItemsControl>
-                            <!-- 全体 row: 平均は全体平均、その他は全体件数 -->
+                            <!-- 全体 row: 各列をその集計方法で全体集計（種類数=全体の種類数, 合計=総和, 平均=全体平均） -->
                             <Border BorderBrush="#CBD5E1" BorderThickness="0,1,0,0" Margin="6,2,0,0"
                                     Padding="0,6,0,0" IsVisible="{Binding HasTotal}">
                                 <StackPanel Orientation="Horizontal" DataContext="{Binding TotalRow}" x:CompileBindings="False">

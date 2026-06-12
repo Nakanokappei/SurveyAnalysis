@@ -70,10 +70,12 @@ public class AnalyticsTableTests
         // 満足度=平均((4+2+5)/3=3.7), ご意見=感情平均(no LLM score yet → —).
         Assert.Equal(new[] { "3", "2", "10", "3.7", "—" }, year.Cells);
 
-        // 全体 row: 平均 columns show the overall average; every other column shows the total 件数 (3).
+        // 全体 row: each column aggregated over all responses with its own method — 記入日種類数=3,
+        // 都道府県種類数=2 (東京都/大阪府), 評価合計=10, 満足度平均=3.7, ご意見感情平均=—. (One group here,
+        // so the total equals that group's cells.)
         Assert.Equal("全体", table.Total.Label);
         Assert.Equal(3, table.Total.Count);
-        Assert.Equal(new[] { "3", "3", "3", "3.7", "—" }, table.Total.Cells);
+        Assert.Equal(new[] { "3", "2", "10", "3.7", "—" }, table.Total.Cells);
     }
 
     [Fact]
@@ -91,6 +93,38 @@ public class AnalyticsTableTests
         Assert.Equal("1", tokyo.Cells[1]); // 都道府県 distinct
         Assert.Equal("5", tokyo.Cells[2]); // 評価 sum
         Assert.Equal("4.5", tokyo.Cells[3]); // 満足度 average
+    }
+
+    [Fact]
+    public void Total_row_distinct_count_is_over_all_responses_not_the_response_count()
+    {
+        using var temp = new TempDatabase();
+        var projects = new ProjectRepository(temp.Db);
+        var responses = new ResponseRepository(temp.Db);
+        var analytics = new AnalyticsRepository(temp.Db);
+
+        var project = new Project { Name = "P" };
+        project.Fields.Add(new DataField { Name = "記入日", FieldType = FieldType.Date, UseForAggregation = true });
+        project.Fields.Add(new DataField { Name = "都道府県", FieldType = FieldType.PrefectureOnly });
+        var pid = projects.Insert(project);
+        responses.InsertResponses(pid, "t.csv", new[]
+        {
+            Response(("記入日", "2026/05/11"), ("都道府県", "東京都")),
+            Response(("記入日", "2026/06/11"), ("都道府県", "東京都")), // same prefecture, different month
+            Response(("記入日", "2026/07/11"), ("都道府県", "大阪府")),
+        });
+        analytics.Rebuild(project);
+
+        var columns = new[] { new AnalysisColumn("都道府県", FieldAggregation.DistinctCount) };
+        var year = analytics.AggregateRows(pid, AnalysisGrouping.Time, TimeScope.Root, null, null, columns).Rows.Single();
+        var months = analytics.AggregateRows(pid, AnalysisGrouping.Time, year.ChildScope!, null, null, columns);
+
+        // Three month groups, each with one distinct prefecture.
+        Assert.Equal(3, months.Rows.Count);
+        Assert.All(months.Rows, r => Assert.Equal("1", r.Cells[0]));
+        // 全体 = distinct prefectures across all responses = {東京都, 大阪府} = 2 — not the 3 responses,
+        // and not 1+1+1 summed across groups.
+        Assert.Equal("2", months.Total.Cells[0]);
     }
 
     [Fact]

@@ -231,13 +231,10 @@ public sealed class AnalyticsRepository
             .Select(g => new AnalysisRow(g.Label, columns.Select(c => g.Cell(c)).ToList(), g.Sentiment.Count, g.Child))
             .ToList();
 
-        // 全体 row: averages show the overall average; every other column shows the total 件数.
+        // 全体 row: each column is aggregated over all responses with its own method — 種類数 counts the
+        // distinct values across the whole set (not the response count), 合計 sums, 平均 averages.
         var totalCount = grand.Sentiment.Count;
-        var totalCells = columns
-            .Select(c => c.Aggregation is FieldAggregation.Average or FieldAggregation.SentimentAverage
-                ? grand.Cell(c)
-                : totalCount.ToString())
-            .ToList();
+        var totalCells = columns.Select(c => grand.Cell(c)).ToList();
         return new AnalysisTable(rows, new AnalysisRow("全体", totalCells, totalCount, null));
     }
 
