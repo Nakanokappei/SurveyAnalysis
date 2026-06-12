@@ -25,6 +25,10 @@ public partial class MainWindowViewModel : ViewModelBase
     // Raised when the user asks to create a project; the view opens the modal design dialog.
     public event Action? CreateProjectRequested;
 
+    // Raised when the user asks to create a project from a CSV; the view picks the file and opens the
+    // design dialog seeded from its columns.
+    public event Action? CreateProjectFromCsvRequested;
+
     // Raised when the user asks to import CSV; the view opens the modal import dialog.
     public event Action<Project>? ImportRequested;
 
@@ -71,6 +75,10 @@ public partial class MainWindowViewModel : ViewModelBase
     [RelayCommand]
     private void CreateProject() => CreateProjectRequested?.Invoke();
 
+    // CSV からプロジェクトを作る → the view picks a CSV and shows the design dialog seeded from it.
+    [RelayCommand]
+    private void CreateFromCsv() => CreateProjectFromCsvRequested?.Invoke();
+
     // Opens a pre-filled sample project so the dashboard can be reviewed without the
     // full design + scan flow. Prototype convenience only.
     [RelayCommand]
@@ -87,6 +95,24 @@ public partial class MainWindowViewModel : ViewModelBase
         if (project.Months.Count == 0)
             project.Months.Add("（今月）");
         _projects.Insert(project);
+        CurrentProject = project;
+        CurrentPage = new DashboardViewModel(project, _responses, project.Months[0]);
+    }
+
+    // Called by the host after the user reviews a CSV-seeded schema and confirms: persist the project,
+    // import the CSV's rows as responses (mapped to the fields by column name), refresh the analytics
+    // star so the slices reflect the new rows immediately, then open the new project's dashboard.
+    public void FinishProjectFromCsv(Project project, CsvFile csv, string source)
+    {
+        if (project.Months.Count == 0)
+            project.Months.Add("（今月）");
+        _projects.Insert(project);
+
+        var responses = CsvProjectImport.BuildResponses(project.Fields, csv);
+        if (responses.Count > 0)
+            _responses.InsertResponses(project.Id, source, responses);
+        _analytics.Rebuild(project);
+
         CurrentProject = project;
         CurrentPage = new DashboardViewModel(project, _responses, project.Months[0]);
     }

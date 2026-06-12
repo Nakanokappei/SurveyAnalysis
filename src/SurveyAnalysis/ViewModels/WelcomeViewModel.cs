@@ -30,6 +30,10 @@ public partial class WelcomeViewModel : ViewModelBase
     [RelayCommand]
     private void CreateProject() => _shell.CreateProjectCommand.Execute(null);
 
+    // CSVを取り込んでプロジェクトを作る
+    [RelayCommand]
+    private void CreateFromCsv() => _shell.CreateFromCsvCommand.Execute(null);
+
     [RelayCommand]
     private void OpenSample() => _shell.OpenSampleProjectCommand.Execute(null);
 }

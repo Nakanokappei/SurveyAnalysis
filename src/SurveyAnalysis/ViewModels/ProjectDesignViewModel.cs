@@ -5,6 +5,7 @@ using System.ComponentModel;
 using System.Linq;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
+using SurveyAnalysis.Data;
 using SurveyAnalysis.Models;
 
 namespace SurveyAnalysis.ViewModels;
@@ -70,6 +71,23 @@ public partial class ProjectDesignViewModel : ViewModelBase
         foreach (var field in existing.Fields)
             Fields.Add(CloneField(field));
     }
+
+    // CSV-seeded create mode: one field per CSV column (data type guessed from the values), the
+    // project name suggested from the file name. The parsed CSV is retained as SourceCsv so the host
+    // can import its rows once the user has reviewed and confirmed the guessed schema.
+    public ProjectDesignViewModel(byte[] csvBytes, string fileName)
+    {
+        SourceCsv = CsvFile.Parse(csvBytes);
+        Fields.CollectionChanged += OnFieldsChanged;
+        var suggested = System.IO.Path.GetFileNameWithoutExtension(fileName);
+        ProjectName = string.IsNullOrWhiteSpace(suggested) ? "新しいプロジェクト" : suggested;
+        foreach (var field in CsvProjectImport.InferFields(SourceCsv))
+            Fields.Add(field);
+    }
+
+    // Non-null when this dialog was seeded from a CSV (the "CSV からプロジェクトを作る" flow); carries the
+    // parsed rows so the host can import them after the project is created. Null for manual/edit modes.
+    public CsvFile? SourceCsv { get; }
 
     // プロジェクト名が変わったら作成可否を再判定
     partial void OnProjectNameChanged(string value) => CreateProjectCommand.NotifyCanExecuteChanged();

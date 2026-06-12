@@ -43,6 +43,10 @@
         <Button Content="＋ プロジェクトを作る" Command="{Binding CreateProjectCommand}"
                 HorizontalAlignment="Center" Padding="22,12" FontSize="15"
                 Background="#005FB8" Foreground="White" CornerRadius="4"/>
+        <Button Content="CSV からプロジェクトを作る" Command="{Binding CreateFromCsvCommand}"
+                HorizontalAlignment="Center" Padding="18,10" FontSize="14"
+                Background="White" Foreground="#005FB8"
+                BorderBrush="#005FB8" BorderThickness="1" CornerRadius="4"/>
         <Button Content="サンプルプロジェクトを開く" Command="{Binding OpenSampleCommand}"
                 HorizontalAlignment="Center" Padding="18,9" FontSize="13"
                 Background="Transparent" Foreground="#005FB8"/>
