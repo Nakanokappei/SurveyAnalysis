@@ -47,7 +47,7 @@ public partial class MainWindow : Window
     // インポート（モーダルダイアログ）。CSVをマージする画面を開く。
     private async void OnImportRequested(Project project)
     {
-        var dialog = new ImportWindow { DataContext = new ImportViewModel(project) };
+        var dialog = new ImportWindow { DataContext = new ImportViewModel(project, AppServices.Responses) };
         await dialog.ShowDialog(this);
     }
 

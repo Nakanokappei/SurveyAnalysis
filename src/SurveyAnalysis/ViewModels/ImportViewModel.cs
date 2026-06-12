@@ -4,15 +4,20 @@ using System.ComponentModel;
 using System.Linq;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
+using SurveyAnalysis.Data;
 using SurveyAnalysis.Models;
 
 namespace SurveyAnalysis.ViewModels;
 
-// インポート画面。デジタル回収したCSVを1件ずつ（単票）プレビューし、CSVの各列を
-// プロジェクトのデータ項目へ対応づける。プロトタイプではダミーデータ。
+// インポート画面。デジタル回収したCSVを1件ずつ（単票）プレビューし、CSVの各列をプロジェクトの
+// データ項目へ対応づけてマージ（保存）する。列は読み込んだCSVのヘッダーから作られ、行を移動しても
+// 対応づけ（SelectedMapping）は保持される。マージは対応づけを適用して回答(responses)を永続化する。
 public partial class ImportViewModel : ViewModelBase
 {
     private const string NoMapping = "（取り込まない）";
+
+    private readonly Project _project;
+    private readonly ResponseRepository _responses;
 
     [ObservableProperty]
     private string _selectedFile = "（CSVファイル未選択）";
@@ -20,11 +25,14 @@ public partial class ImportViewModel : ViewModelBase
     [ObservableProperty]
     private string _statusMessage = "";
 
-    // CSVの列（列名＋プロジェクト項目への対応）。
-    public ObservableCollection<ImportColumn> Columns { get; }
+    // CSVの列（列名＋プロジェクト項目への対応）。読み込み時にヘッダーから作り直す。
+    public ObservableCollection<ImportColumn> Columns { get; } = new();
 
-    // 取り込み対象の行（各列の値）。プロトタイプのダミー。
-    private readonly List<string[]> _rows;
+    // 取り込み対象の行（各列の値）。読み込んだCSVのデータ行。
+    private List<string[]> _rows = new();
+
+    // 取り込み元ファイル名（responses.source に保存）。
+    private string _source = "";
 
     // 対応づけ候補（「取り込まない」＋プロジェクトの項目名）。
     public ObservableCollection<string> MappingOptions { get; }
@@ -40,36 +48,51 @@ public partial class ImportViewModel : ViewModelBase
     // 「3 / 10」のような位置表示。
     public string RowPosition => _rows.Count == 0 ? "0 / 0" : $"{CurrentIndex + 1} / {_rows.Count}";
 
-    public ImportViewModel(Project? project)
+    public ImportViewModel(Project project, ResponseRepository responses)
     {
+        _project = project;
+        _responses = responses;
+
+        // 対応づけ候補は「取り込まない」＋プロジェクトの項目名。自動マッピングはしない（誤割り当て防止）。
         MappingOptions = new ObservableCollection<string> { NoMapping };
-        if (project is not null)
-            foreach (var field in project.Fields)
-                if (!string.IsNullOrWhiteSpace(field.Name) && !MappingOptions.Contains(field.Name))
-                    MappingOptions.Add(field.Name);
+        foreach (var field in project.Fields)
+            if (!string.IsNullOrWhiteSpace(field.Name) && !MappingOptions.Contains(field.Name))
+                MappingOptions.Add(field.Name);
+    }
 
-        // CSVの生の列名。自動マッピングはしない（誤割り当て防止）。各列は既定で未選択
-        // (SelectedMapping = null) にして、ユーザーに取り込み先の選択を迫る。
-        Columns = new ObservableCollection<ImportColumn>
-        {
-            new() { Name = "回答日" },
-            new() { Name = "工事内容" },
-            new() { Name = "スタッフ評価" },
-            new() { Name = "自由記述" },
-        };
-        // 対応づけが変わるたびにマージ可否（全列が決まったか）を再判定する。
+    // 選択されたCSVの中身を読み込み、ヘッダーから列を作り直してプレビューを表示する。
+    public void LoadCsv(byte[] bytes, string fileName)
+    {
+        var csv = CsvFile.Parse(bytes);
+
+        // 前回の列の購読を解除してから、ヘッダーで作り直す。
         foreach (var column in Columns)
-            column.PropertyChanged += OnColumnChanged;
-
-        _rows = new List<string[]>
+            column.PropertyChanged -= OnColumnChanged;
+        Columns.Clear();
+        foreach (var name in csv.Header)
         {
-            new[] { "2026/05/20", "宅内配線工事", "4", "料金プランの比較資料がほしい。" },
-            new[] { "2026/05/21", "訪問・点検", "5", "希望日にすぐ予約できて助かった。" },
-            new[] { "2026/05/22", "宅内配線工事", "2", "接続が不安定で再訪問をお願いした。" },
-            new[] { "2026/05/23", "宅内配線工事", "5", "担当の方の説明が分かりやすかった。" },
-        };
+            var column = new ImportColumn { Name = name };
+            column.PropertyChanged += OnColumnChanged;
+            Columns.Add(column);
+        }
 
+        _rows = new List<string[]>(csv.Rows);
+        _source = fileName;
+        SelectedFile = fileName;
+        CurrentIndex = 0;
         UpdateValues();
+
+        StatusMessage = csv.Rows.Count == 0
+            ? "このCSVには取り込める行がありませんでした。"
+            : $"{csv.Header.Count} 列・{csv.Rows.Count} 行を読み込みました。各列の取り込み先を選んでください。";
+
+        // 新しいデータに合わせてナビゲーションとマージの可否を更新する。
+        FirstCommand.NotifyCanExecuteChanged();
+        PreviousCommand.NotifyCanExecuteChanged();
+        NextCommand.NotifyCanExecuteChanged();
+        LastCommand.NotifyCanExecuteChanged();
+        MergeCommand.NotifyCanExecuteChanged();
+        OnPropertyChanged(nameof(RowPosition));
     }
 
     // 列の対応づけが変わったら、マージボタンの有効/無効を更新。
@@ -110,23 +133,41 @@ public partial class ImportViewModel : ViewModelBase
     [RelayCommand(CanExecute = nameof(CanGoNext))]
     private void Last() => CurrentIndex = _rows.Count - 1;
 
-    // CSVファイルを選択（プロトタイプでは未実装）
-    [RelayCommand]
-    private void SelectFile()
+    // 行があり、すべての列で取り込み先が選ばれている（未選択が1つも無い）ときだけマージ可能。
+    private bool CanMerge() => _rows.Count > 0 && Columns.Count > 0 && Columns.All(c => c.SelectedMapping is not null);
+
+    // マージ：対応づけを各行に適用して回答(responses)を保存し、件数を表示する。
+    [RelayCommand(CanExecute = nameof(CanMerge))]
+    private void Merge()
     {
-        SelectedFile = @"C:\Surveys\digital_responses_202605.csv";
-        StatusMessage = "（プロトタイプ）ファイル選択ダイアログは未実装です。プレビューはダミーです。";
+        var responses = new List<SurveyResponse>();
+        foreach (var row in _rows)
+        {
+            var answers = new List<FieldAnswer>();
+            for (var i = 0; i < Columns.Count; i++)
+            {
+                var mapping = Columns[i].SelectedMapping;
+                if (mapping is null || mapping == NoMapping)
+                    continue;
+                answers.Add(new FieldAnswer(mapping, i < row.Length ? row[i] : ""));
+            }
+            if (answers.Count > 0)
+                responses.Add(new SurveyResponse { Answers = answers });
+        }
+
+        if (responses.Count == 0)
+        {
+            StatusMessage = "取り込む列がありません（すべて「（取り込まない）」になっています）。";
+            return;
+        }
+
+        _responses.InsertResponses(_project.Id, _source, responses);
+        var total = _responses.CountForProject(_project.Id);
+        StatusMessage = $"{responses.Count} 件をマージしました（このプロジェクトの回答数：{total} 件）。";
     }
 
-    // すべての列で取り込み先が選ばれている（未選択が1つも無い）ときだけマージ可能。
-    private bool CanMerge() => Columns.Count > 0 && Columns.All(c => c.SelectedMapping is not null);
-
-    // マージ（プロトタイプでは未実装）
-    [RelayCommand(CanExecute = nameof(CanMerge))]
-    private void Merge() => StatusMessage = $"（プロトタイプ）{_rows.Count} 件を、設定した対応づけでマージした想定です。";
-
     // CSVの1列：列名、プロジェクト項目への対応（ドロップダウン選択）、現在行の値。
-    // 列インスタンスは固定なので、行移動しても対応づけ（SelectedMapping）は保持される。
+    // 列インスタンスは読み込み中は固定なので、行移動しても対応づけ（SelectedMapping）は保持される。
     public partial class ImportColumn : ObservableObject
     {
         public required string Name { get; init; }

@@ -12,6 +12,7 @@ public static class AppServices
 
     public static readonly ProjectRepository Projects = new(Database);
     public static readonly SettingsRepository Settings = new(Database);
+    public static readonly ResponseRepository Responses = new(Database);
 
     private static AppDatabase CreateDatabase()
     {

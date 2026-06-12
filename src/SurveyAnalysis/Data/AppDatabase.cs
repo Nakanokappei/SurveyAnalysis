@@ -83,6 +83,20 @@ public sealed class AppDatabase
             label       TEXT NOT NULL
         );
 
+        CREATE TABLE IF NOT EXISTS responses (
+            id            INTEGER PRIMARY KEY AUTOINCREMENT,
+            project_id    INTEGER NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+            source        TEXT NOT NULL,
+            imported_utc  TEXT NOT NULL
+        );
+
+        CREATE TABLE IF NOT EXISTS answers (
+            id           INTEGER PRIMARY KEY AUTOINCREMENT,
+            response_id  INTEGER NOT NULL REFERENCES responses(id) ON DELETE CASCADE,
+            field_name   TEXT NOT NULL,
+            value        TEXT NOT NULL
+        );
+
         CREATE TABLE IF NOT EXISTS settings (
             key    TEXT PRIMARY KEY,
             value  TEXT NOT NULL

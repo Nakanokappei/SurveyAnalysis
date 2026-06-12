@@ -34,7 +34,7 @@
                         <TextBlock Text="CSVファイル" Foreground="#64748B" FontSize="12"/>
                         <TextBlock Text="{Binding SelectedFile}" Foreground="#0F172A" FontSize="14"/>
                     </StackPanel>
-                    <Button Grid.Column="1" Content="ファイルを選択" Command="{Binding SelectFileCommand}"
+                    <Button Grid.Column="1" Content="ファイルを選択" Click="OnSelectFileClick"
                             VerticalAlignment="Center" Margin="0,0,10,0"
                             Background="#E2E8F0" Foreground="#0F172A" Padding="14,9" CornerRadius="4"/>
                     <Button Grid.Column="2" Content="マージ" Command="{Binding MergeCommand}"

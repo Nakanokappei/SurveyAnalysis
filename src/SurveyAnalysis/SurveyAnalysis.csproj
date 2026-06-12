@@ -26,5 +26,7 @@
          self-contained osx/win publish carries it). DPAPI protects secret settings on Windows. -->
     <PackageReference Include="Microsoft.Data.Sqlite" Version="8.0.10" />
     <PackageReference Include="System.Security.Cryptography.ProtectedData" Version="8.0.0" />
+    <!-- CP932/Shift-JIS support for CSV imports (Excel on Japanese Windows exports CP932). -->
+    <PackageReference Include="System.Text.Encoding.CodePages" Version="8.0.0" />
   </ItemGroup>
 </Project>
