@@ -113,9 +113,9 @@ public sealed class MainForm : Form
         bottom.Dock = DockStyle.Bottom;
         bottom.AutoSize = true;
         bottom.AutoSizeMode = AutoSizeMode.GrowAndShrink;
-        // Bottom inset = 16 DIP to match the top: the 設定 button adds 8 (its bottom padding) + 1 (its
-        // bottom margin) below its text, so the panel contributes the remaining 7.
-        bottom.Padding = new Padding(0, LogicalToDeviceUnits(8), 0, LogicalToDeviceUnits(7));
+        // Bottom inset = 16 DIP to match the top: the 設定 button adds 2 (its bottom padding) below its
+        // text (no bottom margin), so the panel contributes the remaining 14.
+        bottom.Padding = new Padding(0, LogicalToDeviceUnits(8), 0, LogicalToDeviceUnits(14));
         if (_shell.IsProjectOpen)
         {
             AddRow(bottom, NavButton("＋ インポート (CSV)", () => _shell.ImportCommand.Execute(null)));
@@ -207,19 +207,24 @@ public sealed class MainForm : Form
         var button = new Button
         {
             Text = text,
-            AutoSize = true,
-            AutoSizeMode = AutoSizeMode.GrowAndShrink,
+            // Fixed compact height (AutoSize made the buttons ~27 DIP tall — far more than the text —
+            // which dwarfed the gaps; a fixed height keeps the rows tight and the 8 DIP gap visible).
+            AutoSize = false,
             Anchor = AnchorStyles.Left | AnchorStyles.Right,
             FlatStyle = FlatStyle.Flat,
             BackColor = Theme.SidebarBack,
             ForeColor = Theme.NavText,
             TextAlign = ContentAlignment.MiddleLeft,
             Font = Theme.Font(10f),
-            Margin = new Padding(LogicalToDeviceUnits(8), LogicalToDeviceUnits(1), LogicalToDeviceUnits(8), LogicalToDeviceUnits(1)),
-            Padding = new Padding(LogicalToDeviceUnits(8), LogicalToDeviceUnits(8), LogicalToDeviceUnits(6), LogicalToDeviceUnits(8)),
+            // 8 DIP gap between items, made by the top margin only (the item above has no bottom margin),
+            // so the spacing is exactly 8 DIP rather than the sum of two margins.
+            Margin = new Padding(LogicalToDeviceUnits(8), LogicalToDeviceUnits(8), LogicalToDeviceUnits(8), 0),
+            // Only the left indent matters now (height is fixed); no vertical padding.
+            Padding = new Padding(LogicalToDeviceUnits(8), 0, LogicalToDeviceUnits(6), 0),
             Cursor = Cursors.Hand,
             TabStop = false,
         };
+        button.Height = LogicalToDeviceUnits(20);
         button.FlatAppearance.BorderSize = 0;
         button.FlatAppearance.MouseOverBackColor = Theme.SidebarHover;
         button.Click += (_, _) => onClick();
@@ -232,7 +237,11 @@ public sealed class MainForm : Form
         var button = NavButton(text, onClick);
         button.ForeColor = Theme.SubNavText;
         button.Font = Theme.Font(9f);
-        button.Padding = new Padding(LogicalToDeviceUnits(28), LogicalToDeviceUnits(6), LogicalToDeviceUnits(6), LogicalToDeviceUnits(6));
+        // Sub-items hug their parent (時間別) and each other — a 2 DIP gap vs the 8 DIP between top-level
+        // items — so the menu / sub-menu hierarchy reads. Slightly shorter than a top-level item.
+        button.Margin = new Padding(LogicalToDeviceUnits(8), LogicalToDeviceUnits(2), LogicalToDeviceUnits(8), 0);
+        button.Padding = new Padding(LogicalToDeviceUnits(28), 0, LogicalToDeviceUnits(6), 0);
+        button.Height = LogicalToDeviceUnits(18);
         return button;
     }
 
@@ -254,7 +263,7 @@ public sealed class MainForm : Form
         Height = LogicalToDeviceUnits(1),
         Anchor = AnchorStyles.Left | AnchorStyles.Right,
         BackColor = Theme.SidebarHover,
-        Margin = new Padding(LogicalToDeviceUnits(14), LogicalToDeviceUnits(8), LogicalToDeviceUnits(14), LogicalToDeviceUnits(8)),
+        Margin = new Padding(LogicalToDeviceUnits(14), LogicalToDeviceUnits(8), LogicalToDeviceUnits(14), 0),
     };
 
     // 新規プロジェクト作成（モーダル）。確定された下書きを保存して開く。
