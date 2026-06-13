@@ -11,6 +11,10 @@ namespace SurveyAnalysis.WinForms;
 internal sealed class SettingsForm : Form
 {
     private readonly SettingsViewModel _vm;
+    private readonly Font _tabFont = Theme.Font(10f);
+    private readonly Font _tabFontBold = Theme.Font(10f, FontStyle.Bold);
+    private readonly TabControl _tabs;
+    private readonly TableLayoutPanel _header;
 
     public SettingsForm(SettingsViewModel vm)
     {
@@ -19,31 +23,58 @@ internal sealed class SettingsForm : Form
 
         _vm = vm;
         Text = "設定";
-        MaximizeBox = false;  // dialogs are not maximizable
-        ClientSize = new Size(640, 560);
+        // A fixed-size dialog: not resizable, no maximize / minimize.
+        FormBorderStyle = FormBorderStyle.FixedDialog;
+        MaximizeBox = false;
+        MinimizeBox = false;
+        ClientSize = new Size(720, 660);
         StartPosition = FormStartPosition.CenterParent;
         Font = Theme.Font();
         BackColor = Theme.ContentBack;
-        MinimumSize = new Size(560, 480);
+        // 8 DIP gap between the window edges and the content (header / tab control).
+        Padding = new Padding(LogicalToDeviceUnits(8));
 
         // Header with the reset action floated to the right (a spacer column pushes it over).
-        var header = new TableLayoutPanel { Dock = DockStyle.Top, ColumnCount = 2, RowCount = 1, AutoSize = true, AutoSizeMode = AutoSizeMode.GrowAndShrink, BackColor = Theme.ContentBack, Padding = new Padding(0, 8, 16, 4) };
-        header.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
-        header.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
-        header.RowStyles.Add(new RowStyle(SizeType.AutoSize));
-        var reset = new Button { Text = "デフォルトに戻す", AutoSize = true, FlatStyle = FlatStyle.Flat, BackColor = Theme.ContentBack, ForeColor = Theme.Muted, Font = Theme.Font(9f), Cursor = Cursors.Hand, Anchor = AnchorStyles.Right, Padding = new Padding(10, 5, 10, 5) };
+        _header = new TableLayoutPanel { Dock = DockStyle.Top, ColumnCount = 2, RowCount = 1, AutoSize = true, AutoSizeMode = AutoSizeMode.GrowAndShrink, BackColor = Theme.ContentBack, Padding = new Padding(0, 0, 0, 6) };
+        _header.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
+        _header.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
+        _header.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+        var reset = new Button { Text = "↺ デフォルトに戻す", AutoSize = true, FlatStyle = FlatStyle.Flat, BackColor = Theme.ContentBack, ForeColor = Theme.Muted, Font = Theme.Font(9f), Cursor = Cursors.Hand, Anchor = AnchorStyles.Right, Padding = new Padding(10, 5, 10, 5) };
         reset.FlatAppearance.BorderColor = Theme.CardBorder;
         reset.FlatAppearance.BorderSize = 1;
         reset.Click += (_, _) => _vm.ResetToDefaultsCommand.Execute(null);
-        header.Controls.Add(reset, 1, 0);
+        _header.Controls.Add(reset, 1, 0);
 
-        var tabs = new TabControl { Dock = DockStyle.Fill, Font = Theme.Font(10f) };
-        tabs.TabPages.Add(BuildGeneralTab());
-        tabs.TabPages.Add(BuildMailTab());
-        tabs.TabPages.Add(BuildLlmTab());
+        // Owner-drawn tabs so the selected tab can be bold + accent-coloured (the default control gives
+        // no per-tab font), making the current tab obvious.
+        _tabs = new TabControl { Dock = DockStyle.Fill, Font = _tabFont, DrawMode = TabDrawMode.OwnerDrawFixed };
+        _tabs.DrawItem += DrawTab;
+        _tabs.TabPages.Add(BuildGeneralTab());
+        _tabs.TabPages.Add(BuildMailTab());
+        _tabs.TabPages.Add(BuildLlmTab());
 
-        Controls.Add(tabs);
-        Controls.Add(header);
+        Controls.Add(_tabs);
+        Controls.Add(_header);
+    }
+
+    // Size the dialog to the tallest tab (メール → SMTP, 8 rows) plus a 20% margin, with the width
+    // derived from that height by the golden ratio. Done once on load — the form renders at
+    // AutoScaleFactor 1 (the app-wide DPI behaviour), so the row pitch is measured rather than assumed.
+    protected override void OnLoad(System.EventArgs e)
+    {
+        base.OnLoad(e);
+
+        // Per-row pitch from the LLM tab's grid (6 always-visible rows, no show/hide).
+        var perRow = _tabs.TabPages[2].Controls[0].PreferredSize.Height / 6.0;
+        const int tallestRows = 8; // メール(SMTP): 差出人 宛先 種別 ホスト ポート ユーザー名 パスワード TLS
+        var tabStrip = _tabs.DisplayRectangle.Top;            // tab strip + top border
+        var pagePadding = _tabs.TabPages[0].Padding.Vertical; // the white inner padding of a page
+        var minHeight = (int)System.Math.Round(tallestRows * perRow)
+            + pagePadding + tabStrip + _header.PreferredSize.Height + Padding.Vertical;
+
+        var height = (int)System.Math.Round(minHeight * 1.2);   // +20% margin
+        var width = (int)System.Math.Round(height * 1.618);     // golden ratio
+        ClientSize = new Size(width, height);
     }
 
     // ===== 全般 =====
@@ -75,23 +106,16 @@ internal sealed class SettingsForm : Form
         BindCombo(serverType, () => _vm.MailServerType, v => _vm.MailServerType = v, nameof(_vm.MailServerType));
         AddRow(grid, "メールサーバー種別", serverType);
 
-        // Gmail section (visible when 種別 = Gmail).
-        var gmail = SubSection(
-            ("Gmail アドレス", Bound(new TextBox(), nameof(_vm.GmailAddress))),
-            ("アプリパスワード", Bound(new TextBox { UseSystemPasswordChar = true }, nameof(_vm.GmailAppPassword))));
-        gmail.DataBindings.Add("Visible", _vm, nameof(_vm.IsGmail));
-        AddRow(grid, "", gmail);
+        // Gmail rows (shown when 種別 = Gmail) — same row style as the rest, not a boxed sub-panel.
+        AddToggleRow(grid, "Gmail アドレス", Bound(new TextBox(), nameof(_vm.GmailAddress)), nameof(_vm.IsGmail));
+        AddToggleRow(grid, "アプリパスワード", Bound(new TextBox { UseSystemPasswordChar = true }, nameof(_vm.GmailAppPassword)), nameof(_vm.IsGmail));
 
-        // SMTP section (visible when 種別 = SMTP).
-        var smtp = SubSection(
-            ("ホスト", Bound(new TextBox(), nameof(_vm.SmtpHost))),
-            ("ポート", Bound(new TextBox(), nameof(_vm.SmtpPort))),
-            ("ユーザー名", Bound(new TextBox(), nameof(_vm.SmtpUsername))),
-            ("パスワード", Bound(new TextBox { UseSystemPasswordChar = true }, nameof(_vm.SmtpPassword))));
-        var tls = BoundCheck(new CheckBox { Text = "TLS を使う", AutoSize = true, Anchor = AnchorStyles.Left, Margin = new Padding(0, 4, 0, 0) }, nameof(_vm.SmtpUseTls));
-        AddStacked(smtp, tls);
-        smtp.DataBindings.Add("Visible", _vm, nameof(_vm.IsSmtp));
-        AddRow(grid, "", smtp);
+        // SMTP rows (shown when 種別 = SMTP).
+        AddToggleRow(grid, "ホスト", Bound(new TextBox(), nameof(_vm.SmtpHost)), nameof(_vm.IsSmtp));
+        AddToggleRow(grid, "ポート", Bound(new TextBox(), nameof(_vm.SmtpPort)), nameof(_vm.IsSmtp));
+        AddToggleRow(grid, "ユーザー名", Bound(new TextBox(), nameof(_vm.SmtpUsername)), nameof(_vm.IsSmtp));
+        AddToggleRow(grid, "パスワード", Bound(new TextBox { UseSystemPasswordChar = true }, nameof(_vm.SmtpPassword)), nameof(_vm.IsSmtp));
+        AddToggleRow(grid, "", BoundCheck(new CheckBox { Text = "TLS を使う", AutoSize = true }, nameof(_vm.SmtpUseTls)), nameof(_vm.IsSmtp));
 
         page.Controls.Add(grid);
         return page;
@@ -131,51 +155,49 @@ internal sealed class SettingsForm : Form
     // the rows stay correctly ordered.
     private static void AddRow(TableLayoutPanel grid, string caption, Control input)
     {
-        var label = new Label { Text = caption, AutoSize = true, ForeColor = Theme.BodyText, Font = Theme.Font(9.5f), Anchor = AnchorStyles.Right, Margin = new Padding(0, 8, 8, 8) };
-        // Text inputs (and the SMTP/Gmail sub-panels) stretch to fill the input column; the short-value
-        // combos keep their own width and stay left-aligned.
-        if (input is TextBox)
-            input.Anchor = AnchorStyles.Left | AnchorStyles.Right;
-        input.Margin = new Padding(0, 6, 0, 6);
+        grid.Controls.Add(MakeLabel(caption));
+        grid.Controls.Add(StyleInput(input));
+    }
+
+    // Like AddRow, but the label + input show only while `visibleProperty` is true — the AutoSize row
+    // collapses when both are hidden, so the Gmail / SMTP groups appear and disappear with the 種別
+    // while looking identical to the always-visible rows.
+    private void AddToggleRow(TableLayoutPanel grid, string caption, Control input, string visibleProperty)
+    {
+        var label = MakeLabel(caption);
+        StyleInput(input);
+        label.DataBindings.Add("Visible", _vm, visibleProperty);
+        input.DataBindings.Add("Visible", _vm, visibleProperty);
         grid.Controls.Add(label);
         grid.Controls.Add(input);
     }
 
-    // A bordered sub-panel stacking a few labeled inputs (for the Gmail / SMTP groups). A 1-column
-    // TableLayoutPanel so the inputs stretch to the panel width via Anchor (and the panel itself fills
-    // the grid's input column).
-    private TableLayoutPanel SubSection(params (string Caption, Control Input)[] rows)
+    // A right-aligned caption for the input beside it.
+    private static Label MakeLabel(string caption) =>
+        new() { Text = caption, AutoSize = true, ForeColor = Theme.BodyText, Font = Theme.Font(9.5f), Anchor = AnchorStyles.Right, Margin = new Padding(0, 8, 8, 8) };
+
+    // Text inputs stretch to fill the input column; short-value combos keep their own width.
+    private static Control StyleInput(Control input)
     {
-        // AutoSize panel sized to its inputs' width (a fixed, DPI-scaled-at-construction width — an
-        // AutoSize panel in a Percent column does NOT stretch via Anchor, so a fill would collapse it).
-        var panel = new TableLayoutPanel
-        {
-            ColumnCount = 1,
-            AutoSize = true, AutoSizeMode = AutoSizeMode.GrowAndShrink,
-            GrowStyle = TableLayoutPanelGrowStyle.AddRows,
-            Anchor = AnchorStyles.Top | AnchorStyles.Left,
-            BorderStyle = BorderStyle.FixedSingle,
-            BackColor = ColorTranslator.FromHtml("#F8FAFC"),
-            Padding = new Padding(10),
-        };
-        panel.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
-        foreach (var (caption, input) in rows)
-        {
-            input.Width = 300;
-            input.Anchor = AnchorStyles.Left;
-            input.Margin = new Padding(0, 0, 0, 6);
-            AddStacked(panel, new Label { Text = caption, AutoSize = true, ForeColor = Theme.Muted, Font = Theme.Font(8.5f), Anchor = AnchorStyles.Left, Margin = new Padding(0, 6, 0, 0) });
-            AddStacked(panel, input);
-        }
-        return panel;
+        if (input is TextBox)
+            input.Anchor = AnchorStyles.Left | AnchorStyles.Right;
+        input.Margin = new Padding(0, 6, 0, 6);
+        return input;
     }
 
-    // Appends a control as a new AutoSize row in a single-column stack.
-    private static void AddStacked(TableLayoutPanel panel, Control c)
+    // Draws a tab: the selected one bold + accent-coloured on a white (page-matching) background, the
+    // rest regular + muted on the panel background — so the current tab reads clearly.
+    private void DrawTab(object? sender, DrawItemEventArgs e)
     {
-        panel.RowStyles.Add(new RowStyle(SizeType.AutoSize));
-        panel.Controls.Add(c, 0, panel.RowCount);
-        panel.RowCount++;
+        var tabs = (TabControl)sender!;
+        var selected = e.Index == tabs.SelectedIndex;
+        using var back = new SolidBrush(selected ? Color.White : Theme.ContentBack);
+        e.Graphics.FillRectangle(back, e.Bounds);
+        TextRenderer.DrawText(
+            e.Graphics, tabs.TabPages[e.Index].Text,
+            selected ? _tabFontBold : _tabFont, e.Bounds,
+            selected ? Theme.Accent : Theme.BodyText,
+            TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter);
     }
 
     private ComboBox ModelCombo(System.Func<string> get, System.Action<string> set, string property)
