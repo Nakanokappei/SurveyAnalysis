@@ -10,7 +10,7 @@ namespace SurveyAnalysis.WinForms;
 // A centered card shows the saved projects as a file-style list (a DataGridView with an explicit 開く
 // link per row) and offers the three entry points. Built from layout containers (a TableLayoutPanel
 // centers the card, the card stacks its rows); the only sizes are the card width (1.5× the heading's
-// measured width) and the list height (ten rows), and inter-control spacing is expressed in DIP via
+// measured width) and the list height (eight rows), and inter-control spacing is expressed in DIP via
 // LogicalToDeviceUnits — this control is not auto-scaled, so raw literals would be device pixels (see
 // the sidebar indent note in MainForm).
 internal sealed class WelcomeControl : UserControl
@@ -164,10 +164,10 @@ internal sealed class WelcomeControl : UserControl
             grid.Rows[i].Tag = summary;
         }
 
-        // Sized for ten rows plus the header; beyond ten projects the grid scrolls. MinimumSize (not
+        // Sized for eight rows plus the header; beyond eight projects the grid scrolls. MinimumSize (not
         // just Height) is required because an AutoSize TableLayoutPanel row otherwise shrinks the grid
         // to its ~1-row preferred height, clipping it.
-        var height = rowHeight * 11;
+        var height = rowHeight * 9;
         grid.Height = height;
         grid.MinimumSize = new Size(0, height);
 

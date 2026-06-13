@@ -32,10 +32,12 @@ public sealed class MainForm : Form
         AutoScaleMode = AutoScaleMode.Dpi;
 
         Text = "アンケート分析";
-        // Client area at near-golden-ratio proportions: 970 × 600 DIP (970/600 ≈ 1.617 ≈ φ). Expressed
+        // Outer window at near-golden-ratio proportions: 970 × 600 DIP (970/600 ≈ 1.617 ≈ φ). Expressed
         // in DIP via LogicalToDeviceUnits so the window is the intended size at any DPI scaling (raw
         // literals would be device px on this PerMonitorV2 setup — see the sidebar indent note).
-        ClientSize = new Size(LogicalToDeviceUnits(970), LogicalToDeviceUnits(600));
+        Size = new Size(LogicalToDeviceUnits(970), LogicalToDeviceUnits(600));
+        // Don't let the window shrink uselessly small: minimum 800 × 500 DIP (also the outer window).
+        MinimumSize = new Size(LogicalToDeviceUnits(800), LogicalToDeviceUnits(500));
         StartPosition = FormStartPosition.CenterScreen;
         Font = Theme.Font();
         BackColor = Theme.ContentBack;
