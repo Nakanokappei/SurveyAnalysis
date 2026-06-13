@@ -26,14 +26,16 @@ internal sealed class SettingsForm : Form
         BackColor = Theme.ContentBack;
         MinimumSize = new Size(560, 480);
 
-        // Header with the reset action on the right.
-        var header = new Panel { Dock = DockStyle.Top, Height = 44, BackColor = Theme.ContentBack };
-        var reset = new Button { Text = "デフォルトに戻す", AutoSize = true, FlatStyle = FlatStyle.Flat, BackColor = Theme.ContentBack, ForeColor = Theme.Muted, Font = Theme.Font(9f), Cursor = Cursors.Hand };
+        // Header with the reset action floated to the right (a spacer column pushes it over).
+        var header = new TableLayoutPanel { Dock = DockStyle.Top, ColumnCount = 2, RowCount = 1, AutoSize = true, AutoSizeMode = AutoSizeMode.GrowAndShrink, BackColor = Theme.ContentBack, Padding = new Padding(0, 8, 16, 4) };
+        header.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
+        header.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
+        header.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+        var reset = new Button { Text = "デフォルトに戻す", AutoSize = true, FlatStyle = FlatStyle.Flat, BackColor = Theme.ContentBack, ForeColor = Theme.Muted, Font = Theme.Font(9f), Cursor = Cursors.Hand, Anchor = AnchorStyles.Right, Padding = new Padding(10, 5, 10, 5) };
         reset.FlatAppearance.BorderColor = Theme.CardBorder;
         reset.FlatAppearance.BorderSize = 1;
         reset.Click += (_, _) => _vm.ResetToDefaultsCommand.Execute(null);
-        header.Controls.Add(reset);
-        header.Resize += (_, _) => reset.Location = new Point(header.Width - reset.Width - 16, (header.Height - reset.Height) / 2);
+        header.Controls.Add(reset, 1, 0);
 
         var tabs = new TabControl { Dock = DockStyle.Fill, Font = Theme.Font(10f) };
         tabs.TabPages.Add(BuildGeneralTab());
@@ -86,8 +88,8 @@ internal sealed class SettingsForm : Form
             ("ポート", Bound(new TextBox(), nameof(_vm.SmtpPort))),
             ("ユーザー名", Bound(new TextBox(), nameof(_vm.SmtpUsername))),
             ("パスワード", Bound(new TextBox { UseSystemPasswordChar = true }, nameof(_vm.SmtpPassword))));
-        var tls = BoundCheck(new CheckBox { Text = "TLS を使う", AutoSize = true }, nameof(_vm.SmtpUseTls));
-        smtp.Controls.Add(tls);
+        var tls = BoundCheck(new CheckBox { Text = "TLS を使う", AutoSize = true, Anchor = AnchorStyles.Left, Margin = new Padding(0, 4, 0, 0) }, nameof(_vm.SmtpUseTls));
+        AddStacked(smtp, tls);
         smtp.DataBindings.Add("Visible", _vm, nameof(_vm.IsSmtp));
         AddRow(grid, "", smtp);
 
@@ -130,24 +132,50 @@ internal sealed class SettingsForm : Form
     private static void AddRow(TableLayoutPanel grid, string caption, Control input)
     {
         var label = new Label { Text = caption, AutoSize = true, ForeColor = Theme.BodyText, Font = Theme.Font(9.5f), Anchor = AnchorStyles.Right, Margin = new Padding(0, 8, 8, 8) };
-        if (input is TextBox || input is ComboBox)
-            input.Width = 360;
+        // Text inputs (and the SMTP/Gmail sub-panels) stretch to fill the input column; the short-value
+        // combos keep their own width and stay left-aligned.
+        if (input is TextBox)
+            input.Anchor = AnchorStyles.Left | AnchorStyles.Right;
         input.Margin = new Padding(0, 6, 0, 6);
         grid.Controls.Add(label);
         grid.Controls.Add(input);
     }
 
-    // A bordered sub-panel stacking a few labeled inputs (for the Gmail / SMTP groups).
-    private Panel SubSection(params (string Caption, Control Input)[] rows)
+    // A bordered sub-panel stacking a few labeled inputs (for the Gmail / SMTP groups). A 1-column
+    // TableLayoutPanel so the inputs stretch to the panel width via Anchor (and the panel itself fills
+    // the grid's input column).
+    private TableLayoutPanel SubSection(params (string Caption, Control Input)[] rows)
     {
-        var panel = new FlowLayoutPanel { FlowDirection = FlowDirection.TopDown, WrapContents = false, AutoSize = true, AutoSizeMode = AutoSizeMode.GrowAndShrink, BorderStyle = BorderStyle.FixedSingle, BackColor = ColorTranslator.FromHtml("#F8FAFC"), Padding = new Padding(10) };
+        // AutoSize panel sized to its inputs' width (a fixed, DPI-scaled-at-construction width — an
+        // AutoSize panel in a Percent column does NOT stretch via Anchor, so a fill would collapse it).
+        var panel = new TableLayoutPanel
+        {
+            ColumnCount = 1,
+            AutoSize = true, AutoSizeMode = AutoSizeMode.GrowAndShrink,
+            GrowStyle = TableLayoutPanelGrowStyle.AddRows,
+            Anchor = AnchorStyles.Top | AnchorStyles.Left,
+            BorderStyle = BorderStyle.FixedSingle,
+            BackColor = ColorTranslator.FromHtml("#F8FAFC"),
+            Padding = new Padding(10),
+        };
+        panel.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
         foreach (var (caption, input) in rows)
         {
-            input.Width = 320;
-            panel.Controls.Add(new Label { Text = caption, AutoSize = true, ForeColor = Theme.Muted, Font = Theme.Font(8.5f), Margin = new Padding(0, 6, 0, 0) });
-            panel.Controls.Add(input);
+            input.Width = 300;
+            input.Anchor = AnchorStyles.Left;
+            input.Margin = new Padding(0, 0, 0, 6);
+            AddStacked(panel, new Label { Text = caption, AutoSize = true, ForeColor = Theme.Muted, Font = Theme.Font(8.5f), Anchor = AnchorStyles.Left, Margin = new Padding(0, 6, 0, 0) });
+            AddStacked(panel, input);
         }
         return panel;
+    }
+
+    // Appends a control as a new AutoSize row in a single-column stack.
+    private static void AddStacked(TableLayoutPanel panel, Control c)
+    {
+        panel.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+        panel.Controls.Add(c, 0, panel.RowCount);
+        panel.RowCount++;
     }
 
     private ComboBox ModelCombo(System.Func<string> get, System.Action<string> set, string property)

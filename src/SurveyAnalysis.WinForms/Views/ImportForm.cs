@@ -1,4 +1,5 @@
 using System;
+using System.Collections.ObjectModel;
 using System.Collections.Specialized;
 using System.ComponentModel;
 using System.Drawing;
@@ -11,18 +12,24 @@ namespace SurveyAnalysis.WinForms;
 // The CSV import dialog — the WinForms counterpart of ImportView.axaml. Picks a CSV, previews it one
 // record at a time (単票) with row navigation, maps each CSV column to a project field, and merges.
 // Binds to the existing ImportViewModel: navigation/merge run its commands, the status line and row
-// position follow its properties, and the per-column rows rebuild when a file is loaded.
+// position follow its properties, and the per-column rows rebuild when a file is loaded. Built from
+// layout containers (no explicit coordinates or width math): a scrolling content panel stacks the
+// sections, the file card and preview header are two-column grids that right-align their buttons, and
+// the column header shares the rows' three-column proportions so the columns line up.
 internal sealed class ImportForm : Form
 {
+    // Shared column proportions for the preview header and every column row, so they align.
+    private const float NamePct = 30f, MappingPct = 30f, ValuePct = 40f;
+
     private readonly ImportViewModel _vm;
 
     private readonly Panel _content = new() { Dock = DockStyle.Fill, AutoScroll = true, BackColor = Theme.ContentBack, Padding = new Padding(28) };
-    private readonly FlowLayoutPanel _stack = new() { FlowDirection = FlowDirection.TopDown, WrapContents = false, AutoSize = true, AutoSizeMode = AutoSizeMode.GrowAndShrink, BackColor = Theme.ContentBack };
-    private readonly Label _selectedFile = new() { AutoSize = true, ForeColor = Theme.TitleText, Font = Theme.Font(10f) };
-    private readonly Label _status = new() { AutoSize = false, Height = 22, ForeColor = ColorTranslator.FromHtml("#B45309"), Font = Theme.Font(9.5f) };
-    private readonly Label _position = new() { AutoSize = false, Width = 64, TextAlign = ContentAlignment.MiddleCenter, ForeColor = Theme.TitleText, Font = Theme.Font(9.5f, FontStyle.Bold) };
-    private readonly FlowLayoutPanel _columns = new() { FlowDirection = FlowDirection.TopDown, WrapContents = false, AutoScroll = true, Dock = DockStyle.Fill, BackColor = Color.White };
-    private readonly Button _merge = new() { Text = "マージ", AutoSize = true, FlatStyle = FlatStyle.Flat, BackColor = Theme.Accent, ForeColor = Color.White, Font = Theme.Font(10f, FontStyle.Bold), Padding = new Padding(18, 8, 18, 8), Cursor = Cursors.Hand };
+    private readonly Label _selectedFile = new() { AutoSize = true, ForeColor = Theme.TitleText, Font = Theme.Font(10f), Anchor = AnchorStyles.Left, Margin = new Padding(0, 2, 0, 0) };
+    private readonly Label _status = new() { AutoSize = true, ForeColor = ColorTranslator.FromHtml("#B45309"), Font = Theme.Font(9.5f), Anchor = AnchorStyles.Left, Margin = new Padding(0, 0, 0, 8) };
+    private readonly Label _position = new() { AutoSize = true, TextAlign = ContentAlignment.MiddleCenter, ForeColor = Theme.TitleText, Font = Theme.Font(9.5f, FontStyle.Bold), Anchor = AnchorStyles.None, Margin = new Padding(8, 0, 8, 0) };
+    private readonly Panel _columns = new() { Dock = DockStyle.Fill, AutoScroll = true, BackColor = Color.White };
+    private readonly TableLayoutPanel _columnRows = NewStack();
+    private readonly Button _merge = new() { Text = "マージ", AutoSize = true, FlatStyle = FlatStyle.Flat, BackColor = Theme.Accent, ForeColor = Color.White, Font = Theme.Font(10f, FontStyle.Bold), Padding = new Padding(18, 8, 18, 8), Cursor = Cursors.Hand, Anchor = AnchorStyles.None, Margin = new Padding(10, 0, 0, 0) };
     private readonly Button _first = NavButton("◀◀ 先頭");
     private readonly Button _previous = NavButton("◀ 戻る");
     private readonly Button _next = NavButton("次へ ▶");
@@ -30,8 +37,6 @@ internal sealed class ImportForm : Form
 
     public ImportForm(ImportViewModel vm)
     {
-        // Scale the whole layout by the monitor DPI (the 96-dpi design values grow with the font),
-        // so nothing clips when Windows runs at >100% scaling. Set before any child is added.
         AutoScaleDimensions = new SizeF(96F, 96F);
         AutoScaleMode = AutoScaleMode.Dpi;
 
@@ -69,90 +74,84 @@ internal sealed class ImportForm : Form
 
     private void BuildLayout()
     {
-        var intro = new Label { Text = "デジタルに回収したアンケートのCSVを取り込み、既存データにマージします。", AutoSize = true, ForeColor = Theme.Muted, Font = Theme.Font(9.5f), Margin = new Padding(0, 0, 0, 14) };
+        var intro = new Label { Text = "デジタルに回収したアンケートのCSVを取り込み、既存データにマージします。", AutoSize = true, ForeColor = Theme.Muted, Font = Theme.Font(9.5f), Anchor = AnchorStyles.Left, Margin = new Padding(0, 0, 0, 14) };
 
-        // File card: file name + select + merge.
-        var fileCard = Card(72);
-        var fileCaption = new Label { Text = "CSVファイル", AutoSize = true, ForeColor = Theme.Muted, Font = Theme.Font(8.5f), Location = new Point(14, 12) };
-        _selectedFile.Location = new Point(14, 32);
-        var select = new Button { Text = "ファイルを選択", AutoSize = true, FlatStyle = FlatStyle.Flat, BackColor = Theme.CardBorder, ForeColor = Theme.TitleText, Font = Theme.Font(9.5f), Padding = new Padding(12, 7, 12, 7), Cursor = Cursors.Hand };
+        // File card: file name on the left, ファイルを選択 / マージ buttons on the right.
+        var fileCard = SoftCard();
+        var fileInner = new TableLayoutPanel { Dock = DockStyle.Top, ColumnCount = 2, RowCount = 1, AutoSize = true, AutoSizeMode = AutoSizeMode.GrowAndShrink, Padding = new Padding(14), BackColor = Color.White };
+        fileInner.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
+        fileInner.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
+        fileInner.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+
+        var fileText = new TableLayoutPanel { ColumnCount = 1, AutoSize = true, AutoSizeMode = AutoSizeMode.GrowAndShrink, Anchor = AnchorStyles.Left };
+        fileText.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
+        AddSection(fileText, new Label { Text = "CSVファイル", AutoSize = true, ForeColor = Theme.Muted, Font = Theme.Font(8.5f), Anchor = AnchorStyles.Left, Margin = Padding.Empty });
+        AddSection(fileText, _selectedFile);
+
+        var select = new Button { Text = "ファイルを選択", AutoSize = true, FlatStyle = FlatStyle.Flat, BackColor = Theme.CardBorder, ForeColor = Theme.TitleText, Font = Theme.Font(9.5f), Padding = new Padding(12, 7, 12, 7), Cursor = Cursors.Hand, Anchor = AnchorStyles.None };
         select.FlatAppearance.BorderSize = 0;
         select.Click += (_, _) => PickAndLoad();
-        fileCard.Controls.AddRange(new Control[] { fileCaption, _selectedFile, select, _merge });
-        fileCard.Resize += (_, _) =>
-        {
-            _merge.Location = new Point(fileCard.Width - _merge.Width - 14, (fileCard.Height - _merge.Height) / 2);
-            select.Location = new Point(_merge.Left - select.Width - 10, (fileCard.Height - select.Height) / 2);
-        };
+        var fileButtons = new FlowLayoutPanel { FlowDirection = FlowDirection.LeftToRight, WrapContents = false, AutoSize = true, AutoSizeMode = AutoSizeMode.GrowAndShrink, Anchor = AnchorStyles.Right };
+        fileButtons.Controls.Add(select);
+        fileButtons.Controls.Add(_merge);
 
-        _status.Margin = new Padding(0, 0, 0, 8);
+        fileInner.Controls.Add(fileText, 0, 0);
+        fileInner.Controls.Add(fileButtons, 1, 0);
+        fileCard.Controls.Add(fileInner);
 
-        // Preview card. Sections are docked (not laid out with TableLayoutPanel Absolute rows, whose
-        // heights do NOT scale with DPI): docked panel heights are control bounds, so they scale with
-        // the font under AutoScaleMode.Dpi and the headings never clip.
-        var preview = Card(0);
+        // Preview card (fixed height; its column list scrolls inside).
+        var preview = SoftCard();
+        preview.AutoSize = false;
         preview.Height = 360;
-        var pv = new Panel { Dock = DockStyle.Fill, BackColor = Color.White };
+        var pv = new Panel { Dock = DockStyle.Fill, BackColor = Color.White, Padding = new Padding(14) };
 
-        var headRow = new Panel { Dock = DockStyle.Top, Height = 40, BackColor = Color.White };
-        var title = new Label { Text = "取り込みプレビュー（単票）", AutoSize = true, ForeColor = Theme.TitleText, Font = Theme.Font(12f, FontStyle.Bold), Location = new Point(0, 8) };
-        var nav = new FlowLayoutPanel { FlowDirection = FlowDirection.LeftToRight, WrapContents = false, AutoSize = true, Location = new Point(260, 4) };
+        // The column list scrolls inside the fixed-height preview; the rows live in a Dock=Top stack so
+        // their width tracks the panel's client area (shrinking when the vertical scrollbar appears,
+        // which avoids a spurious horizontal scrollbar).
+        _columnRows.BackColor = Color.White;
+        _columns.Controls.Add(_columnRows);
+
+        // Header row: title on the left (AutoSize column so the bold title never wraps), navigation
+        // right-aligned in the remaining Percent column.
+        var headRow = new TableLayoutPanel { Dock = DockStyle.Top, ColumnCount = 2, RowCount = 1, AutoSize = true, AutoSizeMode = AutoSizeMode.GrowAndShrink, BackColor = Color.White };
+        headRow.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
+        headRow.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
+        headRow.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+        headRow.Controls.Add(new Label { Text = "取り込みプレビュー（単票）", AutoSize = true, ForeColor = Theme.TitleText, Font = Theme.Font(12f, FontStyle.Bold), Anchor = AnchorStyles.Left }, 0, 0);
+        var nav = new FlowLayoutPanel { FlowDirection = FlowDirection.LeftToRight, WrapContents = false, AutoSize = true, AutoSizeMode = AutoSizeMode.GrowAndShrink, Anchor = AnchorStyles.Right };
         nav.Controls.AddRange(new Control[] { _first, _previous, _position, _next, _last });
-        headRow.Controls.Add(title);
-        headRow.Controls.Add(nav);
-        headRow.Resize += (_, _) => nav.Location = new Point(System.Math.Max(0, headRow.Width - nav.Width), 4);
+        headRow.Controls.Add(nav, 1, 0);
 
-        var colHeader = new Panel { Dock = DockStyle.Top, Height = 22, BackColor = Color.White };
-        colHeader.Controls.Add(new Label { Text = "CSVの列", AutoSize = true, ForeColor = Theme.Muted, Font = Theme.Font(8.5f), Location = new Point(0, 2) });
-        colHeader.Controls.Add(new Label { Text = "取り込み先（項目）", AutoSize = true, ForeColor = Theme.Muted, Font = Theme.Font(8.5f), Location = new Point(156, 2) });
-        colHeader.Controls.Add(new Label { Text = "値", AutoSize = true, ForeColor = Theme.Muted, Font = Theme.Font(8.5f), Location = new Point(372, 2) });
+        // Column header sharing the rows' three-column proportions, then a divider.
+        var colHeader = new TableLayoutPanel { Dock = DockStyle.Top, ColumnCount = 3, RowCount = 1, AutoSize = true, AutoSizeMode = AutoSizeMode.GrowAndShrink, BackColor = Color.White, Margin = new Padding(0, 6, 0, 0) };
+        colHeader.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, NamePct));
+        colHeader.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, MappingPct));
+        colHeader.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, ValuePct));
+        colHeader.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+        colHeader.Controls.Add(HeaderCaption("CSVの列"), 0, 0);
+        colHeader.Controls.Add(HeaderCaption("取り込み先（項目）"), 1, 0);
+        colHeader.Controls.Add(HeaderCaption("値"), 2, 0);
         var divider = new Panel { Dock = DockStyle.Top, Height = 1, BackColor = Theme.CardBorder };
 
-        var hint = new Label { Text = "すべての列の取り込み先を選ぶと「マージ」が有効になります（取り込まない列は「（取り込まない）」を選択）。", Dock = DockStyle.Bottom, Height = 40, ForeColor = Theme.Muted, Font = Theme.Font(8.5f) };
+        var hint = new Label { Text = "すべての列の取り込み先を選ぶと「マージ」が有効になります（取り込まない列は「（取り込まない）」を選択）。", Dock = DockStyle.Bottom, AutoSize = true, ForeColor = Theme.Muted, Font = Theme.Font(8.5f), Padding = new Padding(0, 8, 0, 0) };
 
-        // Add order matters for docking: Fill first (back), then Bottom, then the Top rows in reverse
-        // visual order so headRow ends up at the very top.
-        pv.Controls.Add(_columns);
-        pv.Controls.Add(hint);
-        pv.Controls.Add(divider);
-        pv.Controls.Add(colHeader);
-        pv.Controls.Add(headRow);
+        // Docking add order: Fill first (back), then Bottom, then the Top rows in reverse visual order
+        // so headRow lands at the very top.
+        pv.Controls.Add(_columns);   // Fill
+        pv.Controls.Add(hint);       // Bottom
+        pv.Controls.Add(divider);    // Top (lowest)
+        pv.Controls.Add(colHeader);  // Top
+        pv.Controls.Add(headRow);    // Top (highest)
         preview.Controls.Add(pv);
 
-        _stack.Controls.Add(intro);
-        _stack.Controls.Add(fileCard);
-        _stack.Controls.Add(_status);
-        _stack.Controls.Add(preview);
-        _content.Controls.Add(_stack);
+        // Stack the sections; each one stretches to the content width.
+        var stack = NewStack();
+        AddSection(stack, intro);
+        AddSection(stack, fileCard);
+        AddSection(stack, _status);
+        AddSection(stack, preview);
+        _content.Controls.Add(stack);
         Controls.Add(_content);
-
-        _content.Resize += (_, _) => SyncWidths();
-        _columns.Resize += (_, _) => ResizeColumnRows();
-        _fileCard = fileCard; _preview = preview; _intro = intro;
-        SyncWidths();
-    }
-
-    private Panel _fileCard = null!, _preview = null!;
-    private Label _intro = null!;
-
-    private void SyncWidths()
-    {
-        var width = _content.ClientSize.Width - _content.Padding.Horizontal;
-        if (_content.VerticalScroll.Visible)
-            width -= SystemInformation.VerticalScrollBarWidth;
-        width = Math.Max(420, width);
-
-        foreach (Control c in new Control[] { _intro, _fileCard, _status, _preview })
-            c.Width = width;
-        ResizeColumnRows();
-    }
-
-    // Stretches each column row to the scrolling area's width.
-    private void ResizeColumnRows()
-    {
-        var inner = Math.Max(360, _columns.ClientSize.Width);
-        foreach (Control row in _columns.Controls)
-            row.Width = inner;
     }
 
     // ===== File pick =====
@@ -185,15 +184,15 @@ internal sealed class ImportForm : Form
     // column's SelectedMapping, and the current record's value (which updates as the row is navigated).
     private void RebuildColumns()
     {
-        _columns.SuspendLayout();
-        foreach (Control old in _columns.Controls)
+        _columnRows.SuspendLayout();
+        foreach (Control old in _columnRows.Controls)
             old.Dispose();
-        _columns.Controls.Clear();
-        var inner = Math.Max(360, _columns.ClientSize.Width);
+        _columnRows.Controls.Clear();
+        _columnRows.RowStyles.Clear();
+        _columnRows.RowCount = 0;
         foreach (var column in _vm.Columns)
-            _columns.Controls.Add(new ImportColumnRow(column, _vm.MappingOptions) { Width = inner });
-        _columns.ResumeLayout();
-        ResizeColumnRows();
+            AddSection(_columnRows, new ImportColumnRow(column, _vm.MappingOptions));
+        _columnRows.ResumeLayout();
         RefreshScalars();
     }
 
@@ -217,45 +216,109 @@ internal sealed class ImportForm : Form
         Padding = new Padding(8, 5, 8, 5),
         Margin = new Padding(3, 0, 3, 0),
         Cursor = Cursors.Hand,
+        Anchor = AnchorStyles.None,
     };
 
-    private static Panel Card(int height)
+    private static Label HeaderCaption(string text) => new()
     {
-        var card = new Panel { BackColor = Color.White, Padding = new Padding(20), BorderStyle = BorderStyle.FixedSingle };
-        if (height > 0)
-            card.Height = height;
-        return card;
+        Text = text,
+        AutoSize = true,
+        ForeColor = Theme.Muted,
+        Font = Theme.Font(8.5f),
+        Anchor = AnchorStyles.Left,
+    };
+
+    // A 1-column AutoSize stack whose children flow downward; each child anchors to fill the width.
+    // Docks to the top by default (the caller scrolls via an outer AutoScroll panel); the preview's
+    // column list overrides this to Dock=Fill + its own AutoScroll.
+    private static TableLayoutPanel NewStack()
+    {
+        var stack = new TableLayoutPanel
+        {
+            Dock = DockStyle.Top, ColumnCount = 1,
+            AutoSize = true, AutoSizeMode = AutoSizeMode.GrowAndShrink,
+            GrowStyle = TableLayoutPanelGrowStyle.AddRows,
+            BackColor = Theme.ContentBack,
+        };
+        stack.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
+        return stack;
+    }
+
+    // Appends a section/row as a new AutoSize row, stretched to the column width (unless it set a
+    // left-only Anchor, e.g. captions).
+    private static void AddSection(TableLayoutPanel stack, Control section)
+    {
+        if (section.Anchor == (AnchorStyles.Top | AnchorStyles.Left))  // default → stretch horizontally
+            section.Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right;
+        stack.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+        stack.Controls.Add(section, 0, stack.RowCount);
+        stack.RowCount++;
+    }
+
+    // A white panel with the soft #E2E8F0 border (drawn, not FixedSingle), sized to its content.
+    private static BorderedPanel SoftCard() => new()
+    {
+        AutoSize = true,
+        AutoSizeMode = AutoSizeMode.GrowAndShrink,
+        Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right,
+        BackColor = Color.White,
+    };
+
+    // A panel that draws the soft card border itself (ResizeRedraw keeps it crisp as the card reflows).
+    internal sealed class BorderedPanel : Panel
+    {
+        public BorderedPanel() => ResizeRedraw = true;
+
+        protected override void OnPaint(PaintEventArgs e)
+        {
+            base.OnPaint(e);
+            using var pen = new Pen(Theme.CardBorder);
+            var rect = ClientRectangle;
+            rect.Width -= 1;
+            rect.Height -= 1;
+            e.Graphics.DrawRectangle(pen, rect);
+        }
     }
 }
 
 // One column row in the import preview: the CSV column name, a mapping dropdown (project fields plus
 // 取り込まない), and the current record's value. Writes the chosen mapping back to the column and
-// refreshes the value label whenever the navigated record changes.
+// refreshes the value label whenever the navigated record changes. The three columns share the same
+// proportions as the preview's column header so everything lines up; no fixed coordinates.
 internal sealed class ImportColumnRow : Panel
 {
     private readonly ImportViewModel.ImportColumn _column;
-    private readonly Label _value = new() { AutoSize = false, ForeColor = Theme.TitleText, Font = Theme.Font(9.5f), Location = new Point(372, 6) };
-    private readonly ComboBox _mapping = new() { DropDownStyle = ComboBoxStyle.DropDownList, Width = 190, Location = new Point(156, 4), Font = Theme.Font(9.5f) };
+    private readonly Label _value = new() { AutoSize = false, AutoEllipsis = true, ForeColor = Theme.TitleText, Font = Theme.Font(9.5f), Anchor = AnchorStyles.Left | AnchorStyles.Right, TextAlign = ContentAlignment.MiddleLeft };
+    private readonly ComboBox _mapping = new() { DropDownStyle = ComboBoxStyle.DropDownList, Font = Theme.Font(9.5f), Anchor = AnchorStyles.Left | AnchorStyles.Right, Margin = new Padding(0, 0, 8, 0) };
 
-    public ImportColumnRow(ImportViewModel.ImportColumn column, System.Collections.ObjectModel.ObservableCollection<string> options)
+    public ImportColumnRow(ImportViewModel.ImportColumn column, ObservableCollection<string> options)
     {
         _column = column;
-        Height = 32;
+        AutoSize = true;
+        AutoSizeMode = AutoSizeMode.GrowAndShrink;
+        Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right;
         BackColor = Color.White;
 
-        Controls.Add(new Label { Text = column.Name, AutoSize = false, Size = new Size(150, 24), Location = new Point(0, 6), ForeColor = Theme.BarTrackText, Font = Theme.Font(9.5f, FontStyle.Bold), TextAlign = ContentAlignment.MiddleLeft, AutoEllipsis = true });
+        var grid = new TableLayoutPanel { Dock = DockStyle.Top, ColumnCount = 3, RowCount = 1, AutoSize = true, AutoSizeMode = AutoSizeMode.GrowAndShrink, Padding = new Padding(0, 4, 0, 4), BackColor = Color.White };
+        grid.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 30));
+        grid.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 30));
+        grid.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 40));
+        grid.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+
+        grid.Controls.Add(new Label { Text = column.Name, AutoSize = false, AutoEllipsis = true, ForeColor = Theme.BarTrackText, Font = Theme.Font(9.5f, FontStyle.Bold), TextAlign = ContentAlignment.MiddleLeft, Anchor = AnchorStyles.Left | AnchorStyles.Right, Margin = new Padding(0, 0, 8, 0) }, 0, 0);
+
         foreach (var option in options)
             _mapping.Items.Add(option);
         if (column.SelectedMapping is { } current)
             _mapping.SelectedItem = current;
         _mapping.SelectedIndexChanged += (_, _) => _column.SelectedMapping = _mapping.SelectedItem as string;
-        Controls.Add(_mapping);
+        grid.Controls.Add(_mapping, 1, 0);
 
         _value.Text = column.CurrentValue;
-        Controls.Add(_value);
+        grid.Controls.Add(_value, 2, 0);
 
+        Controls.Add(grid);
         _column.PropertyChanged += OnColumnChanged;
-        Resize += (_, _) => _value.SetBounds(372, 6, Math.Max(40, Width - 372), 20);
     }
 
     protected override void Dispose(bool disposing)

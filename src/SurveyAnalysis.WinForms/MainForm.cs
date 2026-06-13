@@ -86,96 +86,117 @@ public sealed class MainForm : Form
         _sidebar.SuspendLayout();
         _sidebar.Controls.Clear();
 
-        // Keep the sidebar wide enough for its labels at the current DPI (a Dock=Left width is not
-        // reliably DPI-scaled on its own, so the long "プロジェクトを閉じる" label would clip).
+        // A Dock=Left width is not reliably auto-scaled on its own, so convert the design width for the
+        // current DPI to keep the long "プロジェクトを閉じる" label from clipping. The buttons inside no
+        // longer carry explicit sizes — they AutoSize their height from the (point) font and stretch to
+        // the column via Anchor — so this is the sidebar's only DPI-sensitive value.
         _sidebar.Width = LogicalToDeviceUnits(300);
 
         // Bottom actions (docked bottom): import / close while a project is open, then 設定 (app-wide).
-        var bottom = new FlowLayoutPanel
-        {
-            Dock = DockStyle.Bottom,
-            FlowDirection = FlowDirection.TopDown,
-            WrapContents = false,
-            AutoSize = true,
-            AutoSizeMode = AutoSizeMode.GrowAndShrink,
-            Padding = new Padding(0, 8, 0, 12),
-            BackColor = Theme.SidebarBack,
-        };
+        var bottom = NavStack();
+        bottom.Dock = DockStyle.Bottom;
+        bottom.AutoSize = true;
+        bottom.AutoSizeMode = AutoSizeMode.GrowAndShrink;
+        bottom.Padding = new Padding(0, LogicalToDeviceUnits(8), 0, LogicalToDeviceUnits(12));
         if (_shell.IsProjectOpen)
         {
-            bottom.Controls.Add(NavButton("＋ インポート (CSV)", () => _shell.ImportCommand.Execute(null)));
-            bottom.Controls.Add(NavButton("✕ プロジェクトを閉じる", () => _shell.CloseProjectCommand.Execute(null)));
-            bottom.Controls.Add(Divider());
+            AddRow(bottom, NavButton("＋ インポート (CSV)", () => _shell.ImportCommand.Execute(null)));
+            AddRow(bottom, NavButton("✕ プロジェクトを閉じる", () => _shell.CloseProjectCommand.Execute(null)));
+            AddRow(bottom, Divider());
         }
-        bottom.Controls.Add(NavButton("⚙ 設定", OnSettings));
+        AddRow(bottom, NavButton("⚙ 設定", OnSettings));
 
         // Main navigation fills the space above the bottom actions.
-        var nav = new FlowLayoutPanel
-        {
-            Dock = DockStyle.Fill,
-            FlowDirection = FlowDirection.TopDown,
-            WrapContents = false,
-            AutoScroll = true,
-            BackColor = Theme.SidebarBack,
-            Padding = new Padding(0, 14, 0, 0),
-        };
+        var nav = NavStack();
+        nav.Dock = DockStyle.Fill;
+        nav.AutoScroll = true;
+        nav.Padding = new Padding(0, LogicalToDeviceUnits(14), 0, 0);
 
-        nav.Controls.Add(new Label
+        AddRow(nav, new Label
         {
             Text = "プロジェクト",
             ForeColor = Color.White,
             Font = Theme.Font(13.5f, FontStyle.Bold),
             AutoSize = true,
+            Anchor = AnchorStyles.Left,
             Margin = new Padding(16, 4, 16, 2),
         });
         if (_shell.IsProjectOpen && _shell.CurrentProject is { } project)
-            nav.Controls.Add(new Label
+            AddRow(nav, new Label
             {
                 Text = project.Name,
                 ForeColor = Theme.ProjectName,
                 Font = Theme.Font(9f),
                 AutoSize = true,
+                Anchor = AnchorStyles.Left,
                 Margin = new Padding(16, 0, 16, 8),
             });
 
         if (_shell.IsProjectOpen)
         {
-            nav.Controls.Add(NavButton("▤ ダッシュボード", () => _shell.OpenDashboardCommand.Execute(null)));
-            nav.Controls.Add(NavButton("✎ データ項目", () => _shell.EditSchemaCommand.Execute(null)));
-            nav.Controls.Add(SectionLabel("切り口"));
-            nav.Controls.Add(NavButton(_shell.IsTimeExpanded ? "▾ 時間別" : "▸ 時間別", () => _shell.ToggleTimeCommand.Execute(null)));
+            AddRow(nav, NavButton("▤ ダッシュボード", () => _shell.OpenDashboardCommand.Execute(null)));
+            AddRow(nav, NavButton("✎ データ項目", () => _shell.EditSchemaCommand.Execute(null)));
+            AddRow(nav, SectionLabel("切り口"));
+            AddRow(nav, NavButton(_shell.IsTimeExpanded ? "▾ 時間別" : "▸ 時間別", () => _shell.ToggleTimeCommand.Execute(null)));
             if (_shell.IsTimeExpanded)
             {
-                nav.Controls.Add(SubNavButton("期間", () => _shell.OpenPeriodCommand.Execute(null)));
-                nav.Controls.Add(SubNavButton("曜日", () => _shell.OpenWeekdayCommand.Execute(null)));
+                AddRow(nav, SubNavButton("期間", () => _shell.OpenPeriodCommand.Execute(null)));
+                AddRow(nav, SubNavButton("曜日", () => _shell.OpenWeekdayCommand.Execute(null)));
             }
-            nav.Controls.Add(NavButton("▸ 地域別", () => _shell.OpenSliceCommand.Execute(SliceKind.Region)));
-            nav.Controls.Add(NavButton("▸ トピック別", () => _shell.OpenSliceCommand.Execute(SliceKind.Topic)));
+            AddRow(nav, NavButton("▸ 地域別", () => _shell.OpenSliceCommand.Execute(SliceKind.Region)));
+            AddRow(nav, NavButton("▸ トピック別", () => _shell.OpenSliceCommand.Execute(SliceKind.Topic)));
         }
+
+        // Trailing filler row absorbs the leftover height so the nav buttons stay tight at the top
+        // (a Dock=Fill TableLayoutPanel otherwise stretches its last row and the centred button floats).
+        nav.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
+        nav.Controls.Add(new Panel { BackColor = Theme.SidebarBack, Margin = Padding.Empty }, 0, nav.RowCount);
+        nav.RowCount++;
 
         _sidebar.Controls.Add(nav);     // Fill — add first
         _sidebar.Controls.Add(bottom);  // Bottom
         _sidebar.ResumeLayout();
     }
 
-    // A flat, left-aligned sidebar button that highlights on hover, wired to a command.
+    // A single-column stack whose children flow downward and stretch to its width (a TableLayoutPanel,
+    // so an Anchor=Left|Right child fills the column — FlowLayoutPanel ignores Anchor for sizing).
+    private static TableLayoutPanel NavStack()
+    {
+        var stack = new TableLayoutPanel
+        {
+            ColumnCount = 1,
+            GrowStyle = TableLayoutPanelGrowStyle.AddRows,
+            BackColor = Theme.SidebarBack,
+        };
+        stack.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
+        return stack;
+    }
+
+    // Appends a control as a new AutoSize row.
+    private static void AddRow(TableLayoutPanel stack, Control c)
+    {
+        stack.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+        stack.Controls.Add(c, 0, stack.RowCount);
+        stack.RowCount++;
+    }
+
+    // A flat, left-aligned sidebar button that highlights on hover, wired to a command. AutoSize sets
+    // its height from the font (DPI-correct, never clips); Anchor=Left|Right stretches it to the column.
     private Button NavButton(string text, Action onClick)
     {
-        // Sidebar buttons are (re)built at runtime, after the form's one-time auto-scale, so their
-        // pixel sizes are converted to device units for the current DPI (LogicalToDeviceUnits is the
-        // identity at the 96-dpi construction pass, where auto-scale then does the scaling).
         var button = new Button
         {
             Text = text,
-            Width = _sidebar.Width - LogicalToDeviceUnits(24),
-            Height = LogicalToDeviceUnits(38),
+            AutoSize = true,
+            AutoSizeMode = AutoSizeMode.GrowAndShrink,
+            Anchor = AnchorStyles.Left | AnchorStyles.Right,
             FlatStyle = FlatStyle.Flat,
             BackColor = Theme.SidebarBack,
             ForeColor = Theme.NavText,
             TextAlign = ContentAlignment.MiddleLeft,
             Font = Theme.Font(10f),
-            Margin = new Padding(LogicalToDeviceUnits(8), LogicalToDeviceUnits(2), LogicalToDeviceUnits(8), LogicalToDeviceUnits(2)),
-            Padding = new Padding(LogicalToDeviceUnits(10), 0, 0, 0),
+            Margin = new Padding(LogicalToDeviceUnits(8), LogicalToDeviceUnits(1), LogicalToDeviceUnits(8), LogicalToDeviceUnits(1)),
+            Padding = new Padding(LogicalToDeviceUnits(10), LogicalToDeviceUnits(8), LogicalToDeviceUnits(6), LogicalToDeviceUnits(8)),
             Cursor = Cursors.Hand,
             TabStop = false,
         };
@@ -191,8 +212,7 @@ public sealed class MainForm : Form
         var button = NavButton(text, onClick);
         button.ForeColor = Theme.SubNavText;
         button.Font = Theme.Font(9f);
-        button.Padding = new Padding(LogicalToDeviceUnits(30), 0, 0, 0);
-        button.Height = LogicalToDeviceUnits(32);
+        button.Padding = new Padding(LogicalToDeviceUnits(28), LogicalToDeviceUnits(6), LogicalToDeviceUnits(6), LogicalToDeviceUnits(6));
         return button;
     }
 
@@ -203,14 +223,15 @@ public sealed class MainForm : Form
         ForeColor = Theme.SectionHeader,
         Font = Theme.Font(8.5f, FontStyle.Bold),
         AutoSize = true,
+        Anchor = AnchorStyles.Left,
         Margin = new Padding(16, 12, 0, 4),
     };
 
-    // A thin divider line between the project actions and 設定.
+    // A thin divider line between the project actions and 設定 (stretches to the column).
     private Panel Divider() => new()
     {
         Height = LogicalToDeviceUnits(1),
-        Width = _sidebar.Width - LogicalToDeviceUnits(28),
+        Anchor = AnchorStyles.Left | AnchorStyles.Right,
         BackColor = Theme.SidebarHover,
         Margin = new Padding(LogicalToDeviceUnits(14), LogicalToDeviceUnits(8), LogicalToDeviceUnits(14), LogicalToDeviceUnits(8)),
     };
