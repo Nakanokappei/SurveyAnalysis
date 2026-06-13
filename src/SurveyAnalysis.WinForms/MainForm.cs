@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.ComponentModel;
 using System.Drawing;
 using System.IO;
@@ -39,6 +40,9 @@ public sealed class MainForm : Form
         // Don't let the window shrink uselessly small: minimum 800 × 500 DIP (also the outer window).
         MinimumSize = new Size(LogicalToDeviceUnits(800), LogicalToDeviceUnits(500));
         StartPosition = FormStartPosition.CenterScreen;
+        // Reopen where it was last closed (position / size / maximized) when the screen is unchanged;
+        // otherwise the defaults above (centered, 970 × 600) stand.
+        RestoreWindowState();
         Font = Theme.Font();
         BackColor = Theme.ContentBack;
 
@@ -58,6 +62,66 @@ public sealed class MainForm : Form
 
         RebuildSidebar();
         SwapContent();
+    }
+
+    // ===== Window position / size persistence =====
+    // Remember the window's normal bounds, maximized state and the screen size at exit, and restore them
+    // next launch — but only when the screen is the same size, so a layout that fit one monitor is not
+    // forced onto a different one. Stored in the shared key/value settings store under window.* keys.
+
+    private const string WindowBoundsKey = "window.bounds";
+    private const string WindowMaximizedKey = "window.maximized";
+    private const string WindowScreenKey = "window.screen";
+
+    private void RestoreWindowState()
+    {
+        if (Screen.PrimaryScreen is not { } screen)
+            return;
+        var settings = AppServices.Settings.LoadAll();
+        // Restore only when the screen is the same size as when the bounds were saved.
+        if (!settings.TryGetValue(WindowScreenKey, out var savedScreen) || savedScreen != ScreenSizeKey(screen))
+            return;
+        if (!settings.TryGetValue(WindowBoundsKey, out var savedBounds) || !TryParseBounds(savedBounds, out var bounds))
+            return;
+
+        StartPosition = FormStartPosition.Manual;
+        Bounds = bounds;
+        if (settings.TryGetValue(WindowMaximizedKey, out var maxText) && bool.TryParse(maxText, out var maximized) && maximized)
+            WindowState = FormWindowState.Maximized;
+    }
+
+    private void SaveWindowState()
+    {
+        if (Screen.PrimaryScreen is not { } screen)
+            return;
+        // Save the restore (normal) bounds so a maximized/minimized window still remembers its real size.
+        var bounds = WindowState == FormWindowState.Normal ? Bounds : RestoreBounds;
+        AppServices.Settings.Save(new Dictionary<string, string>
+        {
+            [WindowBoundsKey] = $"{bounds.X},{bounds.Y},{bounds.Width},{bounds.Height}",
+            [WindowMaximizedKey] = (WindowState == FormWindowState.Maximized).ToString(),
+            [WindowScreenKey] = ScreenSizeKey(screen),
+        });
+    }
+
+    private static string ScreenSizeKey(Screen screen) => $"{screen.Bounds.Width},{screen.Bounds.Height}";
+
+    private static bool TryParseBounds(string text, out Rectangle bounds)
+    {
+        bounds = Rectangle.Empty;
+        var parts = text.Split(',');
+        if (parts.Length != 4
+            || !int.TryParse(parts[0], out var x) || !int.TryParse(parts[1], out var y)
+            || !int.TryParse(parts[2], out var w) || !int.TryParse(parts[3], out var h))
+            return false;
+        bounds = new Rectangle(x, y, w, h);
+        return true;
+    }
+
+    protected override void OnFormClosing(FormClosingEventArgs e)
+    {
+        SaveWindowState();
+        base.OnFormClosing(e);
     }
 
     // Re-render the affected region when the shell's state changes: the content on a page swap, the
