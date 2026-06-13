@@ -7,12 +7,12 @@ using SurveyAnalysis.ViewModels;
 namespace SurveyAnalysis.WinForms;
 
 // The welcome screen shown when no project is open — the WinForms counterpart of WelcomeView.axaml.
-// A centered card shows the saved projects as a file-style list (ListView in Details view, like
-// Explorer's detail pane) and offers the three entry points. Built from layout containers (a
-// TableLayoutPanel centers the card, the card stacks its rows); the only sizes are the card width
-// (the heading's measured width) and the list height (its row count), and inter-control spacing is
-// expressed in DIP via LogicalToDeviceUnits — this control is not auto-scaled, so raw literals would
-// be device pixels (see the sidebar indent note in MainForm).
+// A centered card shows the saved projects as a file-style list (a DataGridView with an explicit 開く
+// link per row) and offers the three entry points. Built from layout containers (a TableLayoutPanel
+// centers the card, the card stacks its rows); the only sizes are the card width (1.5× the heading's
+// measured width) and the list height (ten rows), and inter-control spacing is expressed in DIP via
+// LogicalToDeviceUnits — this control is not auto-scaled, so raw literals would be device pixels (see
+// the sidebar indent note in MainForm).
 internal sealed class WelcomeControl : UserControl
 {
     // The heading text; its natural one-line width drives the whole card's width (below).
@@ -104,53 +104,84 @@ internal sealed class WelcomeControl : UserControl
         Margin = new Padding(0, 0, 0, 16),
     };
 
-    // The saved projects as a file-style list: a header row of columns, one row per project, reopened
-    // on activate (double-click / Enter) — reading like Explorer's detail pane. PII-free: only the
-    // project name, its field count and its last-updated time (we record updates, not opens).
-    private ListView RecentProjectsList()
+    // The saved projects as a file-style list (a DataGridView, like the dashboard's tables): a header
+    // row, one row per project, and an explicit "開く" link in every row so the open action is visible
+    // rather than relying on double-click. PII-free — only the name, field count and last-updated time
+    // (we record updates, not opens). Double-clicking a row opens it too.
+    private DataGridView RecentProjectsList()
     {
         var rowFont = Theme.Font(9.5f);
-        var list = new ListView
+        var grid = new DataGridView
         {
-            View = View.Details,
-            FullRowSelect = true,
+            ReadOnly = true,
+            AllowUserToAddRows = false,
+            AllowUserToDeleteRows = false,
+            AllowUserToResizeRows = false,
+            AllowUserToResizeColumns = false,
+            RowHeadersVisible = false,
             MultiSelect = false,
-            HideSelection = false,
-            GridLines = false,
-            HeaderStyle = ColumnHeaderStyle.Nonclickable,
+            SelectionMode = DataGridViewSelectionMode.FullRowSelect,
+            BackgroundColor = Color.White,
             BorderStyle = BorderStyle.FixedSingle,
+            // No gridlines between cells — a flat list, not a spreadsheet.
+            CellBorderStyle = DataGridViewCellBorderStyle.None,
             Font = rowFont,
+            EnableHeadersVisualStyles = false,
+            AutoSizeColumnsMode = DataGridViewAutoSizeColumnsMode.Fill,
+            ColumnHeadersHeightSizeMode = DataGridViewColumnHeadersHeightSizeMode.DisableResizing,
             Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right,
             Margin = new Padding(0, 0, 0, 0),
         };
+        grid.ColumnHeadersDefaultCellStyle.Font = Theme.Font(9.5f, FontStyle.Bold);
+        grid.ColumnHeadersDefaultCellStyle.BackColor = Theme.ContentBack;
+        grid.ColumnHeadersDefaultCellStyle.ForeColor = Theme.Muted;
+        // Keep a soft row-selection highlight (not the heavy system blue) so the chosen row is clear.
+        grid.DefaultCellStyle.BackColor = Color.White;
+        grid.DefaultCellStyle.ForeColor = Theme.TitleText;
+        grid.DefaultCellStyle.SelectionBackColor = Color.FromArgb(0xD6, 0xE6, 0xF5);
+        grid.DefaultCellStyle.SelectionForeColor = Theme.TitleText;
+        // Don't let the clicked cell's column header look "selected": render it like a normal header.
+        grid.ColumnHeadersDefaultCellStyle.SelectionBackColor = Theme.ContentBack;
+        grid.ColumnHeadersDefaultCellStyle.SelectionForeColor = Theme.Muted;
 
-        // Column widths apportioned from the card width (device pixels, like the heading measurement).
-        list.Columns.Add("最近のプロジェクト", CardWidth / 2);
-        list.Columns.Add("項目数", CardWidth * 16 / 100, HorizontalAlignment.Right);
-        list.Columns.Add("最終更新日時", CardWidth - CardWidth / 2 - CardWidth * 16 / 100);
+        // Columns fill the card width by weight: name, field count, last-updated, then the 開く link.
+        var nameCol = new DataGridViewTextBoxColumn { HeaderText = "最近のプロジェクト", FillWeight = 44, SortMode = DataGridViewColumnSortMode.NotSortable };
+        var countCol = new DataGridViewTextBoxColumn { HeaderText = "項目数", FillWeight = 16, SortMode = DataGridViewColumnSortMode.NotSortable };
+        countCol.DefaultCellStyle.Alignment = DataGridViewContentAlignment.MiddleRight;
+        var dateCol = new DataGridViewTextBoxColumn { HeaderText = "最終更新日時", FillWeight = 26, SortMode = DataGridViewColumnSortMode.NotSortable };
+        var openCol = new DataGridViewLinkColumn { HeaderText = "", Text = "開く", UseColumnTextForLinkValue = true, FillWeight = 14, LinkColor = Theme.Accent, ActiveLinkColor = Theme.Accent, TrackVisitedState = false, SortMode = DataGridViewColumnSortMode.NotSortable };
+        openCol.DefaultCellStyle.Alignment = DataGridViewContentAlignment.MiddleCenter;
+        grid.Columns.AddRange(nameCol, countCol, dateCol, openCol);
+
+        // Fixed row/header height (DPI-scaled) so the list reliably shows ten rows.
+        var rowHeight = rowFont.Height + LogicalToDeviceUnits(6);
+        grid.RowTemplate.Height = rowHeight;
+        grid.ColumnHeadersHeight = rowHeight;
 
         foreach (var summary in _vm.RecentProjects)
         {
-            var item = new ListViewItem(summary.Name) { Tag = summary };
-            item.SubItems.Add(summary.FieldCount.ToString());
-            item.SubItems.Add(summary.UpdatedUtc.ToLocalTime().ToString("yyyy/MM/dd HH:mm"));
-            list.Items.Add(item);
+            var i = grid.Rows.Add(summary.Name, summary.FieldCount.ToString(), summary.UpdatedUtc.ToLocalTime().ToString("yyyy/MM/dd HH:mm"), null);
+            grid.Rows[i].Tag = summary;
         }
 
-        // Sized to show ten rows plus the header; beyond ten projects the list scrolls. MinimumSize
-        // (not just Height) is required because an AutoSize TableLayoutPanel row otherwise shrinks the
-        // list to its ~1-row preferred height, clipping it.
-        var rowHeight = rowFont.Height + LogicalToDeviceUnits(2);
-        var height = rowHeight * 11; // header + 10 rows
-        list.Height = height;
-        list.MinimumSize = new Size(0, height);
+        // Sized for ten rows plus the header; beyond ten projects the grid scrolls. MinimumSize (not
+        // just Height) is required because an AutoSize TableLayoutPanel row otherwise shrinks the grid
+        // to its ~1-row preferred height, clipping it.
+        var height = rowHeight * 11;
+        grid.Height = height;
+        grid.MinimumSize = new Size(0, height);
 
-        list.ItemActivate += (_, _) =>
+        // Opening swaps the content pane and disposes this control (and the grid), but the grid is still
+        // inside its click WndProc — BeginInvoke runs the open after that returns, so the grid isn't torn
+        // down mid-message.
+        void Open(int rowIndex)
         {
-            if (list.SelectedItems.Count > 0 && list.SelectedItems[0].Tag is ProjectSummary summary)
-                _vm.OpenProjectCommand.Execute(summary);
-        };
-        return list;
+            if (rowIndex >= 0 && grid.Rows[rowIndex].Tag is ProjectSummary summary)
+                BeginInvoke(() => _vm.OpenProjectCommand.Execute(summary));
+        }
+        grid.CellContentClick += (_, e) => { if (e.ColumnIndex == openCol.Index) Open(e.RowIndex); };
+        grid.CellDoubleClick += (_, e) => Open(e.RowIndex);
+        return grid;
     }
 
     // Action button at the heading width (ContentWidth), centered under the heading rather than spanning
