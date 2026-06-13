@@ -11,6 +11,7 @@ internal static class ViewFactory
     {
         WelcomeViewModel vm => new WelcomeControl(vm),
         DashboardViewModel vm => new DashboardControl(vm),
+        TimeSliceViewModel vm => new TimeSliceControl(vm),
         _ => new PlaceholderControl(page),
     };
 }

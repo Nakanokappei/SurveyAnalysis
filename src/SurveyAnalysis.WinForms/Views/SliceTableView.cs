@@ -1,0 +1,182 @@
+using System;
+using System.Collections.Generic;
+using System.Drawing;
+using System.Windows.Forms;
+using SurveyAnalysis.Models;
+using SurveyAnalysis.ViewModels;
+
+namespace SurveyAnalysis.WinForms;
+
+// Shared building blocks for the 切り口 (analysis-table) screens — 時間別(期間/曜日) / 地域別 / トピック別.
+// All three derive from PeriodScopedViewModel and render the same parts: a 集計期間 dropdown top-right, a
+// row(dimension) × field(column) table whose columns come from the view model, a trailing 全体 total
+// row, and — where a dimension drills down — a 個票一覧 list. Centralising these keeps the three controls
+// thin and their tables identical (DataGridView Fill mode, soft card border) and matches the dashboard.
+internal static class SliceTableView
+{
+    // A white card with a soft 1px border, mirroring the dashboard's cards (softer than FixedSingle).
+    public static Panel Card()
+    {
+        var panel = new Panel { BackColor = Color.White, Padding = new Padding(16) };
+        panel.Paint += (_, e) =>
+        {
+            using var pen = new Pen(Theme.CardBorder);
+            var r = panel.ClientRectangle;
+            r.Width -= 1;
+            r.Height -= 1;
+            e.Graphics.DrawRectangle(pen, r);
+        };
+        return panel;
+    }
+
+    // The 集計期間 picker (label + dropdown) shown top-right. The choices come from the view model in the
+    // spec's order (widest first, 2年 → 7日); the current selection is written back on pick. ComboBox's
+    // SelectedItem binding does not write back (HANDOFF §7), so the value is pushed through
+    // SelectedIndexChanged, guarded against the programmatic initial selection.
+    public static FlowLayoutPanel BuildPeriodPicker(PeriodScopedViewModel vm, out ComboBox combo)
+    {
+        var periods = vm.Periods;
+        var box = new ComboBox
+        {
+            DropDownStyle = ComboBoxStyle.DropDownList,
+            Font = Theme.Font(9.5f),
+            AutoSize = true,
+            Anchor = AnchorStyles.None,
+        };
+        foreach (var period in periods)
+            box.Items.Add(AggregationPeriodInfo.Label(period));
+
+        var syncing = false;
+        box.SelectedIndexChanged += (_, _) =>
+        {
+            if (!syncing && box.SelectedIndex >= 0)
+                vm.SelectedPeriod = periods[box.SelectedIndex];
+        };
+        syncing = true;
+        box.SelectedIndex = Array.IndexOf(periods, vm.SelectedPeriod);
+        syncing = false;
+
+        var picker = new FlowLayoutPanel { FlowDirection = FlowDirection.LeftToRight, WrapContents = false, AutoSize = true, Anchor = AnchorStyles.Right };
+        picker.Controls.Add(new Label { Text = "集計期間", AutoSize = true, ForeColor = Theme.BodyText, Font = Theme.Font(10f), Anchor = AnchorStyles.None, Margin = new Padding(0, 0, 8, 0) });
+        picker.Controls.Add(box);
+        combo = box;
+        return picker;
+    }
+
+    // The analysis table: a leading dimension column then one column per project field, each headed by
+    // the field name over its aggregation word (種類数 / 合計 / 平均). Built once from the view model's
+    // fixed column set; rows are filled per scope via FillAnalysisGrid.
+    public static DataGridView BuildAnalysisGrid(string dimensionHeader, IReadOnlyList<AnalysisColumn> columns)
+    {
+        var grid = NewGrid();
+        grid.Columns.Add(TextColumn(dimensionHeader, fillWeight: 28));
+        foreach (var col in columns)
+            grid.Columns.Add(TextColumn($"{col.Name}\n{col.AggregationLabel}", fillWeight: 18));
+        grid.ColumnHeadersDefaultCellStyle.WrapMode = DataGridViewTriState.True;
+        grid.ColumnHeadersHeightSizeMode = DataGridViewColumnHeadersHeightSizeMode.AutoSize;
+        return grid;
+    }
+
+    // Re-populates the analysis grid: one DataGridView row per AnalysisRow (the source row kept in Tag
+    // so a click can map back to it for drilling), then the bold 全体 total row last (no Tag, so it is
+    // never drillable).
+    public static void FillAnalysisGrid(DataGridView grid, IEnumerable<AnalysisRow> rows, AnalysisRow? total)
+    {
+        grid.Rows.Clear();
+        foreach (var row in rows)
+        {
+            var index = grid.Rows.Add(Cells(row));
+            grid.Rows[index].Tag = row;
+        }
+        if (total is not null)
+        {
+            var index = grid.Rows.Add(Cells(total));
+            var totalRow = grid.Rows[index];
+            totalRow.DefaultCellStyle.Font = Theme.Font(9.5f, FontStyle.Bold);
+            totalRow.DefaultCellStyle.BackColor = Theme.ContentBack;
+        }
+    }
+
+    // The 個票一覧 list (記入日 / トピック / 感情 / 抜粋), identical to the dashboard's responses table.
+    // PII never appears here — ResponseRowFactory builds the rows from non-personal fields only.
+    public static DataGridView BuildResponsesGrid()
+    {
+        var grid = NewGrid();
+        grid.Columns.Add(TextColumn("記入日", 22));
+        grid.Columns.Add(TextColumn("トピック", 22));
+        grid.Columns.Add(TextColumn("感情", 14));
+        grid.Columns.Add(TextColumn("抜粋（フリーテキスト）", 42));
+        return grid;
+    }
+
+    public static void FillResponsesGrid(DataGridView grid, IEnumerable<SurveyRow> rows)
+    {
+        grid.Rows.Clear();
+        foreach (var row in rows)
+            grid.Rows.Add(row.EntryDate, row.Topic, row.Sentiment, row.Excerpt);
+    }
+
+    // A clickable breadcrumb (全期間 ＞ 2026年度 ＞ …): each segment is a link except the last (the
+    // current scope), shown bold. Clicking a segment invokes onNavigate to return to that depth.
+    public static FlowLayoutPanel BuildBreadcrumb(IReadOnlyList<Crumb> crumbs, Action<Crumb> onNavigate)
+    {
+        var bar = new FlowLayoutPanel { FlowDirection = FlowDirection.LeftToRight, WrapContents = false, AutoSize = true, AutoSizeMode = AutoSizeMode.GrowAndShrink, BackColor = Color.Transparent, Margin = new Padding(0), Anchor = AnchorStyles.Left };
+        for (var i = 0; i < crumbs.Count; i++)
+        {
+            var crumb = crumbs[i];
+            var isLast = i == crumbs.Count - 1;
+            var link = new Label
+            {
+                Text = crumb.Display,
+                AutoSize = true,
+                Font = Theme.Font(9.5f, isLast ? FontStyle.Bold : FontStyle.Regular),
+                ForeColor = isLast ? Theme.TitleText : Theme.Accent,
+                Cursor = isLast ? Cursors.Default : Cursors.Hand,
+                Margin = new Padding(0, 2, 4, 2),
+            };
+            if (!isLast)
+                link.Click += (_, _) => onNavigate(crumb);
+            bar.Controls.Add(link);
+        }
+        return bar;
+    }
+
+    // ===== shared grid primitives =====
+
+    private static DataGridView NewGrid()
+    {
+        var grid = new DataGridView
+        {
+            Dock = DockStyle.Fill,
+            ReadOnly = true,
+            AllowUserToAddRows = false,
+            AllowUserToDeleteRows = false,
+            AllowUserToResizeRows = false,
+            RowHeadersVisible = false,
+            BackgroundColor = Color.White,
+            BorderStyle = BorderStyle.None,
+            SelectionMode = DataGridViewSelectionMode.FullRowSelect,
+            MultiSelect = false,
+            Font = Theme.Font(9.5f),
+            EnableHeadersVisualStyles = false,
+            AutoSizeColumnsMode = DataGridViewAutoSizeColumnsMode.Fill,
+        };
+        grid.ColumnHeadersDefaultCellStyle.Font = Theme.Font(9.5f, FontStyle.Bold);
+        grid.ColumnHeadersDefaultCellStyle.BackColor = Theme.ContentBack;
+        grid.ColumnHeadersDefaultCellStyle.ForeColor = Theme.Muted;
+        return grid;
+    }
+
+    private static DataGridViewTextBoxColumn TextColumn(string header, int fillWeight) =>
+        new() { HeaderText = header, FillWeight = fillWeight, SortMode = DataGridViewColumnSortMode.NotSortable };
+
+    // Flattens an AnalysisRow into grid cells: the dimension label first, then one cell per column.
+    private static object[] Cells(AnalysisRow row)
+    {
+        var cells = new object[1 + row.Cells.Count];
+        cells[0] = row.Label;
+        for (var i = 0; i < row.Cells.Count; i++)
+            cells[i + 1] = row.Cells[i];
+        return cells;
+    }
+}
