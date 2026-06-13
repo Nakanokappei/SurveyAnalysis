@@ -30,7 +30,7 @@ internal sealed class DashboardControl : UserControl
     private readonly FlowLayoutPanel _topicBars = new() { FlowDirection = FlowDirection.TopDown, WrapContents = false, AutoScroll = true, Dock = DockStyle.Fill };
     private readonly Label _sentimentPending = new() { AutoSize = false, ForeColor = Theme.Faint, Font = Theme.Font(9.5f) };
     private readonly FlowLayoutPanel _sentimentBars = new() { FlowDirection = FlowDirection.TopDown, WrapContents = false, AutoScroll = true, Dock = DockStyle.Fill };
-    private readonly Label _emptyHint = new() { AutoSize = false, Height = 22, ForeColor = Theme.Faint, Font = Theme.Font(9.5f), Dock = DockStyle.Top };
+    private readonly Label _emptyHint = new() { AutoSize = true, ForeColor = Theme.Faint, Font = Theme.Font(9.5f), Dock = DockStyle.Top };
     private readonly DataGridView _grid = NewGrid();
     private readonly FlowLayoutPanel _flow = new()
     {

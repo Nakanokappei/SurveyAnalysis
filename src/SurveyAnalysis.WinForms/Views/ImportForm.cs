@@ -37,6 +37,7 @@ internal sealed class ImportForm : Form
 
         _vm = vm;
         Text = "インポート (CSV)";
+        MaximizeBox = false;  // dialogs are not maximizable
         ClientSize = new Size(880, 620);
         StartPosition = FormStartPosition.CenterParent;
         MinimumSize = new Size(680, 460);

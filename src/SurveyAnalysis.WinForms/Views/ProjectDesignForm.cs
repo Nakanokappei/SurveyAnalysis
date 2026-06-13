@@ -35,6 +35,7 @@ internal sealed class ProjectDesignForm : Form
 
         _vm = vm;
         Text = vm.DialogTitle;
+        MaximizeBox = false;  // dialogs are not maximizable
         ClientSize = new Size(900, 640);
         StartPosition = FormStartPosition.CenterParent;
         MinimumSize = new Size(720, 480);

@@ -16,6 +16,11 @@ internal sealed class WelcomeControl : UserControl
 
     public WelcomeControl(WelcomeViewModel vm)
     {
+        // Created at runtime, so scale to the monitor DPI from a 96-dpi baseline (the buttons' fixed
+        // widths/heights then grow with the font instead of clipping).
+        AutoScaleDimensions = new SizeF(96F, 96F);
+        AutoScaleMode = AutoScaleMode.Dpi;
+
         BackColor = Theme.ContentBack;
 
         // A single-cell outer panel centers the card; the card stacks its rows in one 400px column.
@@ -29,7 +34,9 @@ internal sealed class WelcomeControl : UserControl
             Anchor = AnchorStyles.None,
             BackColor = Theme.ContentBack,
         };
-        card.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, CardWidth));
+        // AutoSize column (not Absolute, which would not scale with DPI) so the card hugs the buttons
+        // even after the DPI auto-scale widens them.
+        card.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
 
         card.Controls.Add(new Label
         {

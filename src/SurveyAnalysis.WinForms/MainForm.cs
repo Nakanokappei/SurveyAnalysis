@@ -86,6 +86,10 @@ public sealed class MainForm : Form
         _sidebar.SuspendLayout();
         _sidebar.Controls.Clear();
 
+        // Keep the sidebar wide enough for its labels at the current DPI (a Dock=Left width is not
+        // reliably DPI-scaled on its own, so the long "プロジェクトを閉じる" label would clip).
+        _sidebar.Width = LogicalToDeviceUnits(300);
+
         // Bottom actions (docked bottom): import / close while a project is open, then 設定 (app-wide).
         var bottom = new FlowLayoutPanel
         {
@@ -157,18 +161,21 @@ public sealed class MainForm : Form
     // A flat, left-aligned sidebar button that highlights on hover, wired to a command.
     private Button NavButton(string text, Action onClick)
     {
+        // Sidebar buttons are (re)built at runtime, after the form's one-time auto-scale, so their
+        // pixel sizes are converted to device units for the current DPI (LogicalToDeviceUnits is the
+        // identity at the 96-dpi construction pass, where auto-scale then does the scaling).
         var button = new Button
         {
             Text = text,
-            Width = _sidebar.Width - 24,
-            Height = 38,
+            Width = _sidebar.Width - LogicalToDeviceUnits(24),
+            Height = LogicalToDeviceUnits(38),
             FlatStyle = FlatStyle.Flat,
             BackColor = Theme.SidebarBack,
             ForeColor = Theme.NavText,
             TextAlign = ContentAlignment.MiddleLeft,
             Font = Theme.Font(10f),
-            Margin = new Padding(8, 2, 8, 2),
-            Padding = new Padding(10, 0, 0, 0),
+            Margin = new Padding(LogicalToDeviceUnits(8), LogicalToDeviceUnits(2), LogicalToDeviceUnits(8), LogicalToDeviceUnits(2)),
+            Padding = new Padding(LogicalToDeviceUnits(10), 0, 0, 0),
             Cursor = Cursors.Hand,
             TabStop = false,
         };
@@ -184,8 +191,8 @@ public sealed class MainForm : Form
         var button = NavButton(text, onClick);
         button.ForeColor = Theme.SubNavText;
         button.Font = Theme.Font(9f);
-        button.Padding = new Padding(30, 0, 0, 0);
-        button.Height = 32;
+        button.Padding = new Padding(LogicalToDeviceUnits(30), 0, 0, 0);
+        button.Height = LogicalToDeviceUnits(32);
         return button;
     }
 
@@ -202,10 +209,10 @@ public sealed class MainForm : Form
     // A thin divider line between the project actions and 設定.
     private Panel Divider() => new()
     {
-        Height = 1,
-        Width = _sidebar.Width - 28,
+        Height = LogicalToDeviceUnits(1),
+        Width = _sidebar.Width - LogicalToDeviceUnits(28),
         BackColor = Theme.SidebarHover,
-        Margin = new Padding(14, 8, 14, 8),
+        Margin = new Padding(LogicalToDeviceUnits(14), LogicalToDeviceUnits(8), LogicalToDeviceUnits(14), LogicalToDeviceUnits(8)),
     };
 
     // 新規プロジェクト作成（モーダル）。確定された下書きを保存して開く。

@@ -19,6 +19,7 @@ internal sealed class SettingsForm : Form
 
         _vm = vm;
         Text = "設定";
+        MaximizeBox = false;  // dialogs are not maximizable
         ClientSize = new Size(640, 560);
         StartPosition = FormStartPosition.CenterParent;
         Font = Theme.Font();
