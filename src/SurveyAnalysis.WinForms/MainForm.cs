@@ -21,6 +21,10 @@ public sealed class MainForm : Form
 
     public MainForm()
     {
+        // Scale the layout by the monitor DPI so text never clips at >100% Windows scaling.
+        AutoScaleDimensions = new SizeF(96F, 96F);
+        AutoScaleMode = AutoScaleMode.Dpi;
+
         Text = "アンケート分析";
         ClientSize = new Size(1165, 720);
         StartPosition = FormStartPosition.CenterScreen;

@@ -30,6 +30,9 @@ internal sealed class ProjectDesignForm : Form
 
     public ProjectDesignForm(ProjectDesignViewModel vm)
     {
+        AutoScaleDimensions = new SizeF(96F, 96F);
+        AutoScaleMode = AutoScaleMode.Dpi;
+
         _vm = vm;
         Text = vm.DialogTitle;
         ClientSize = new Size(900, 640);

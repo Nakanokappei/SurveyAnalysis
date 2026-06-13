@@ -30,6 +30,11 @@ internal sealed class ImportForm : Form
 
     public ImportForm(ImportViewModel vm)
     {
+        // Scale the whole layout by the monitor DPI (the 96-dpi design values grow with the font),
+        // so nothing clips when Windows runs at >100% scaling. Set before any child is added.
+        AutoScaleDimensions = new SizeF(96F, 96F);
+        AutoScaleMode = AutoScaleMode.Dpi;
+
         _vm = vm;
         Text = "インポート (CSV)";
         ClientSize = new Size(880, 620);
@@ -81,18 +86,14 @@ internal sealed class ImportForm : Form
 
         _status.Margin = new Padding(0, 0, 0, 8);
 
-        // Preview card: a fixed-height card whose rows are laid out by a TableLayoutPanel (header /
-        // column header / divider / scrolling columns / hint), so nothing collapses when empty.
+        // Preview card. Sections are docked (not laid out with TableLayoutPanel Absolute rows, whose
+        // heights do NOT scale with DPI): docked panel heights are control bounds, so they scale with
+        // the font under AutoScaleMode.Dpi and the headings never clip.
         var preview = Card(0);
         preview.Height = 360;
-        var pv = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 1, BackColor = Color.White };
-        pv.RowStyles.Add(new RowStyle(SizeType.Absolute, 40));   // header
-        pv.RowStyles.Add(new RowStyle(SizeType.Absolute, 22));   // column header
-        pv.RowStyles.Add(new RowStyle(SizeType.Absolute, 1));    // divider
-        pv.RowStyles.Add(new RowStyle(SizeType.Percent, 100));   // columns (scrolls)
-        pv.RowStyles.Add(new RowStyle(SizeType.Absolute, 40));   // hint
+        var pv = new Panel { Dock = DockStyle.Fill, BackColor = Color.White };
 
-        var headRow = new Panel { Dock = DockStyle.Fill, BackColor = Color.White };
+        var headRow = new Panel { Dock = DockStyle.Top, Height = 40, BackColor = Color.White };
         var title = new Label { Text = "取り込みプレビュー（単票）", AutoSize = true, ForeColor = Theme.TitleText, Font = Theme.Font(12f, FontStyle.Bold), Location = new Point(0, 8) };
         var nav = new FlowLayoutPanel { FlowDirection = FlowDirection.LeftToRight, WrapContents = false, AutoSize = true, Location = new Point(260, 4) };
         nav.Controls.AddRange(new Control[] { _first, _previous, _position, _next, _last });
@@ -100,19 +101,21 @@ internal sealed class ImportForm : Form
         headRow.Controls.Add(nav);
         headRow.Resize += (_, _) => nav.Location = new Point(System.Math.Max(0, headRow.Width - nav.Width), 4);
 
-        var colHeader = new Panel { Dock = DockStyle.Fill, BackColor = Color.White };
+        var colHeader = new Panel { Dock = DockStyle.Top, Height = 22, BackColor = Color.White };
         colHeader.Controls.Add(new Label { Text = "CSVの列", AutoSize = true, ForeColor = Theme.Muted, Font = Theme.Font(8.5f), Location = new Point(0, 2) });
         colHeader.Controls.Add(new Label { Text = "取り込み先（項目）", AutoSize = true, ForeColor = Theme.Muted, Font = Theme.Font(8.5f), Location = new Point(156, 2) });
         colHeader.Controls.Add(new Label { Text = "値", AutoSize = true, ForeColor = Theme.Muted, Font = Theme.Font(8.5f), Location = new Point(372, 2) });
-        var divider = new Panel { Dock = DockStyle.Fill, BackColor = Theme.CardBorder };
+        var divider = new Panel { Dock = DockStyle.Top, Height = 1, BackColor = Theme.CardBorder };
 
-        var hint = new Label { Text = "すべての列の取り込み先を選ぶと「マージ」が有効になります（取り込まない列は「（取り込まない）」を選択）。", Dock = DockStyle.Fill, ForeColor = Theme.Muted, Font = Theme.Font(8.5f) };
+        var hint = new Label { Text = "すべての列の取り込み先を選ぶと「マージ」が有効になります（取り込まない列は「（取り込まない）」を選択）。", Dock = DockStyle.Bottom, Height = 40, ForeColor = Theme.Muted, Font = Theme.Font(8.5f) };
 
-        pv.Controls.Add(headRow, 0, 0);
-        pv.Controls.Add(colHeader, 0, 1);
-        pv.Controls.Add(divider, 0, 2);
-        pv.Controls.Add(_columns, 0, 3);
-        pv.Controls.Add(hint, 0, 4);
+        // Add order matters for docking: Fill first (back), then Bottom, then the Top rows in reverse
+        // visual order so headRow ends up at the very top.
+        pv.Controls.Add(_columns);
+        pv.Controls.Add(hint);
+        pv.Controls.Add(divider);
+        pv.Controls.Add(colHeader);
+        pv.Controls.Add(headRow);
         preview.Controls.Add(pv);
 
         _stack.Controls.Add(intro);

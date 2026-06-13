@@ -82,7 +82,7 @@ internal sealed class DashboardControl : UserControl
     {
         // A top-down flow with explicit per-section heights (so a section never collapses), inside a
         // scrolling panel. Section widths follow the panel width via SyncWidths on resize.
-        AddSection(BuildHeader(), 56);
+        AddSection(BuildHeader(), 64);
         AddSection(BuildDrillUp(), 40);
         AddSection(BuildKpis(), 120);
         AddSection(BuildCharts(), 290);
@@ -122,7 +122,7 @@ internal sealed class DashboardControl : UserControl
         titles.Controls.Add(_breadcrumb);
 
         var picker = new FlowLayoutPanel { FlowDirection = FlowDirection.LeftToRight, WrapContents = false, AutoSize = true, Anchor = AnchorStyles.Right };
-        picker.Controls.Add(new Label { Text = "対象月", AutoSize = true, ForeColor = Theme.BodyText, Font = Theme.Font(10f), Margin = new Padding(0, 8, 8, 0) });
+        picker.Controls.Add(new Label { Text = "対象月", AutoSize = true, ForeColor = Theme.BodyText, Font = Theme.Font(10f), Anchor = AnchorStyles.None, Margin = new Padding(0, 0, 8, 0) });
         picker.Controls.Add(_month);
 
         header.Controls.Add(titles, 0, 0);
@@ -155,8 +155,8 @@ internal sealed class DashboardControl : UserControl
         for (var i = 0; i < 3; i++)
             grid.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100f / 3));
         grid.Controls.Add(KpiCard("総回答数", _totalResponses, "件"), 0, 0);
-        grid.Controls.Add(KpiCard("ネガティブ件数", _negative, "要対応 / 担当者へ通知対象"), 1, 0);
-        grid.Controls.Add(KpiCard("平均感情スコア", _avgSentiment, "-1.0 (否定) 〜 +1.0 (肯定)"), 2, 0);
+        grid.Controls.Add(KpiCard("ネガティブ件数", _negative, "要対応 件数"), 1, 0);
+        grid.Controls.Add(KpiCard("平均感情スコア", _avgSentiment, "-1.0 〜 +1.0"), 2, 0);
         return grid;
     }
 

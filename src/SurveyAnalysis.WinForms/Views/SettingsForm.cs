@@ -14,6 +14,9 @@ internal sealed class SettingsForm : Form
 
     public SettingsForm(SettingsViewModel vm)
     {
+        AutoScaleDimensions = new SizeF(96F, 96F);
+        AutoScaleMode = AutoScaleMode.Dpi;
+
         _vm = vm;
         Text = "設定";
         ClientSize = new Size(640, 560);
@@ -114,7 +117,8 @@ internal sealed class SettingsForm : Form
     private static TableLayoutPanel NewGrid()
     {
         var grid = new TableLayoutPanel { Dock = DockStyle.Top, ColumnCount = 2, AutoSize = true, GrowStyle = TableLayoutPanelGrowStyle.AddRows, BackColor = Color.White };
-        grid.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 170));
+        // AutoSize label column (not Absolute, which would not scale with DPI) so captions always fit.
+        grid.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
         grid.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
         return grid;
     }
