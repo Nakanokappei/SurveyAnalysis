@@ -106,7 +106,9 @@ public sealed class MainForm : Form
             ? LogicalToDeviceUnits(300)
             : ClientSize.Width / 4;
 
-        // Bottom actions (docked bottom): import / close while a project is open, then 設定 (app-wide).
+        // Bottom actions (docked bottom). While a project is open: the data I/O pair (import / export),
+        // then the schema editor (データ項目), then close — each group set off by a divider. 設定 is
+        // app-wide and always present at the very bottom.
         var bottom = NavStack();
         bottom.Dock = DockStyle.Bottom;
         bottom.AutoSize = true;
@@ -117,8 +119,11 @@ public sealed class MainForm : Form
         if (_shell.IsProjectOpen)
         {
             AddRow(bottom, NavButton("＋ インポート (CSV)", () => _shell.ImportCommand.Execute(null)));
-            AddRow(bottom, NavButton("✕ プロジェクトを閉じる", () => _shell.CloseProjectCommand.Execute(null)));
+            AddRow(bottom, NavButton("⬆ エクスポート", OnExportNotImplemented));
             AddRow(bottom, Divider());
+            AddRow(bottom, NavButton("✎ データ項目", () => _shell.EditSchemaCommand.Execute(null)));
+            AddRow(bottom, Divider());
+            AddRow(bottom, NavButton("✕ プロジェクトを閉じる", () => _shell.CloseProjectCommand.Execute(null)));
         }
         AddRow(bottom, NavButton("⚙ 設定", OnSettings));
 
@@ -151,7 +156,6 @@ public sealed class MainForm : Form
         if (_shell.IsProjectOpen)
         {
             AddRow(nav, NavButton("▤ ダッシュボード", () => _shell.OpenDashboardCommand.Execute(null)));
-            AddRow(nav, NavButton("✎ データ項目", () => _shell.EditSchemaCommand.Execute(null)));
             AddRow(nav, SectionLabel("切り口"));
             AddRow(nav, NavButton(_shell.IsTimeExpanded ? "▾ 時間別" : "▸ 時間別", () => _shell.ToggleTimeCommand.Execute(null)));
             if (_shell.IsTimeExpanded)
@@ -309,6 +313,11 @@ public sealed class MainForm : Form
         form.ShowDialog(this);
         viewModel.Save();
     }
+
+    // エクスポートはメニューだけ先に用意した段階（機能は未実装）。
+    private void OnExportNotImplemented() =>
+        MessageBox.Show(this, "エクスポート機能は今後実装予定です。", "エクスポート",
+            MessageBoxButtons.OK, MessageBoxIcon.Information);
 
     // Placeholder for a dialog/screen not yet migrated, so navigation never dead-ends during the port.
     private void ShowPending(string what) =>
