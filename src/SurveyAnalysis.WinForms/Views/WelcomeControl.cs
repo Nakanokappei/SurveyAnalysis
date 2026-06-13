@@ -7,67 +7,46 @@ using SurveyAnalysis.ViewModels;
 namespace SurveyAnalysis.WinForms;
 
 // The welcome screen shown when no project is open — the WinForms counterpart of WelcomeView.axaml.
-// A centered card lists previously saved projects (each reopenable) and offers the three entry points:
-// create a project, create one from a CSV, or open the bundled sample. Buttons invoke the existing
-// WelcomeViewModel commands, so all behaviour is shared with the (retiring) Avalonia front end.
+// A centered card lists previously saved projects (each reopenable) and offers the three entry points.
+// Built entirely from layout containers (no explicit coordinates or sizes): a TableLayoutPanel centers
+// the card, the card stacks its rows, and the buttons stretch to a uniform width via Anchor while their
+// height comes from AutoSize + Padding — so spacing and DPI scaling are handled by the framework.
 internal sealed class WelcomeControl : UserControl
 {
-    private const int CardWidth = 400;
+    // The card's content width: a wrap boundary for the body text that also sets the card/button width.
+    // A logical value the form's font auto-scale converts for the current DPI.
+    private const int CardWidth = 360;
 
     public WelcomeControl(WelcomeViewModel vm)
     {
-        // Created at runtime, so scale to the monitor DPI from a 96-dpi baseline (the buttons' fixed
-        // widths/heights then grow with the font instead of clipping).
+        // Pure layout-container UI, so the only DPI-sensitive values are the spacings and the wrap
+        // width; a 96-dpi baseline lets the form's auto-scale convert them for the current monitor.
         AutoScaleDimensions = new SizeF(96F, 96F);
         AutoScaleMode = AutoScaleMode.Dpi;
 
+        Dock = DockStyle.Fill;
         BackColor = Theme.ContentBack;
 
-        // A single-cell outer panel centers the card; the card stacks its rows in one 400px column.
+        // Single cell that centers the card both ways.
         var root = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 1, RowCount = 1, BackColor = Theme.ContentBack };
+
         var card = new TableLayoutPanel
         {
             ColumnCount = 1,
-            GrowStyle = TableLayoutPanelGrowStyle.AddRows,
             AutoSize = true,
             AutoSizeMode = AutoSizeMode.GrowAndShrink,
+            GrowStyle = TableLayoutPanelGrowStyle.AddRows,
             Anchor = AnchorStyles.None,
             BackColor = Theme.ContentBack,
         };
-        // AutoSize column (not Absolute, which would not scale with DPI) so the card hugs the buttons
-        // even after the DPI auto-scale widens them.
         card.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
 
-        card.Controls.Add(new Label
-        {
-            Text = "プロジェクトを開始しましょう",
-            Font = Theme.Font(20f, FontStyle.Bold),
-            ForeColor = Theme.TitleText,
-            AutoSize = true,
-            Margin = new Padding(0, 0, 0, 8),
-        });
-        card.Controls.Add(new Label
-        {
-            Text = "プロジェクトを作成すると、スキャン画像の読み込み・トピック割り当て・感情分析・月次レポートを管理できます。",
-            Font = Theme.Font(9.5f),
-            ForeColor = Theme.BodyText,
-            AutoSize = true,
-            MaximumSize = new Size(CardWidth, 0),
-            Margin = new Padding(0, 0, 0, 14),
-        });
+        card.Controls.Add(Title("プロジェクトを開始しましょう"));
+        card.Controls.Add(Body("プロジェクトを作成すると、スキャン画像の読み込み・トピック割り当て・感情分析・月次レポートを管理できます。"));
 
-        // 最近のプロジェクト: shown only when there are saved projects. Populated once, so a plain
-        // per-item button is enough (no live collection binding needed here).
         if (vm.HasRecentProjects)
         {
-            card.Controls.Add(new Label
-            {
-                Text = "最近のプロジェクト",
-                Font = Theme.Font(8.5f, FontStyle.Bold),
-                ForeColor = Theme.SectionHeader,
-                AutoSize = true,
-                Margin = new Padding(0, 4, 0, 4),
-            });
+            card.Controls.Add(SectionCaption("最近のプロジェクト"));
             foreach (var summary in vm.RecentProjects)
                 card.Controls.Add(RecentButton(vm, summary));
         }
@@ -80,29 +59,55 @@ internal sealed class WelcomeControl : UserControl
         Controls.Add(root);
     }
 
-    // Shared flat-button base; the variants below differ only in colour and height.
-    private static Button BaseButton(string text, Action onClick, int height)
+    private static Label Title(string text) => new()
     {
-        var button = new Button
+        Text = text,
+        Font = Theme.Font(20f, FontStyle.Bold),
+        ForeColor = Theme.TitleText,
+        AutoSize = true,
+        MaximumSize = new Size(CardWidth, 0),
+        Margin = new Padding(0, 0, 0, 8),
+    };
+
+    private static Label Body(string text) => new()
+    {
+        Text = text,
+        Font = Theme.Font(9.5f),
+        ForeColor = Theme.BodyText,
+        AutoSize = true,
+        MaximumSize = new Size(CardWidth, 0),
+        Margin = new Padding(0, 0, 0, 16),
+    };
+
+    private static Label SectionCaption(string text) => new()
+    {
+        Text = text,
+        Font = Theme.Font(8.5f, FontStyle.Bold),
+        ForeColor = Theme.SectionHeader,
+        AutoSize = true,
+        Margin = new Padding(0, 4, 0, 4),
+    };
+
+    // Full-width button: Anchor stretches it to the card width; AutoSize + Padding set its height.
+    private static Button BaseButton(string text, Action onClick) =>
+        WithClick(new Button
         {
             Text = text,
-            Width = CardWidth,
-            Height = height,
+            AutoSize = true,
+            AutoSizeMode = AutoSizeMode.GrowAndShrink,
+            Anchor = AnchorStyles.Left | AnchorStyles.Right,
             FlatStyle = FlatStyle.Flat,
             Font = Theme.Font(10.5f),
             TextAlign = ContentAlignment.MiddleCenter,
-            Cursor = Cursors.Hand,
+            Padding = new Padding(12, 9, 12, 9),
             Margin = new Padding(0, 4, 0, 0),
+            Cursor = Cursors.Hand,
             TabStop = false,
-        };
-        button.Click += (_, _) => onClick();
-        return button;
-    }
+        }, onClick);
 
-    // The primary call to action: solid accent fill.
     private static Button PrimaryButton(string text, Action onClick)
     {
-        var button = BaseButton(text, onClick, 44);
+        var button = BaseButton(text, onClick);
         button.BackColor = Theme.Accent;
         button.ForeColor = Theme.AccentText;
         button.FlatAppearance.BorderSize = 0;
@@ -110,10 +115,9 @@ internal sealed class WelcomeControl : UserControl
         return button;
     }
 
-    // The secondary action: outlined in the accent colour.
     private static Button OutlineButton(string text, Action onClick)
     {
-        var button = BaseButton(text, onClick, 40);
+        var button = BaseButton(text, onClick);
         button.BackColor = Color.White;
         button.ForeColor = Theme.Accent;
         button.FlatAppearance.BorderColor = Theme.Accent;
@@ -121,10 +125,9 @@ internal sealed class WelcomeControl : UserControl
         return button;
     }
 
-    // The tertiary action: link-like, no border or fill.
     private static Button LinkButton(string text, Action onClick)
     {
-        var button = BaseButton(text, onClick, 32);
+        var button = BaseButton(text, onClick);
         button.BackColor = Theme.ContentBack;
         button.ForeColor = Theme.Accent;
         button.FlatAppearance.BorderSize = 0;
@@ -135,24 +138,30 @@ internal sealed class WelcomeControl : UserControl
     // One saved project: name on top, field count and last-updated below, reopened on click.
     private static Button RecentButton(WelcomeViewModel vm, ProjectSummary summary)
     {
-        var button = new Button
+        var button = WithClick(new Button
         {
             Text = $"{summary.Name}\n{summary.FieldCountDisplay}    {summary.UpdatedDisplay}",
-            Width = CardWidth,
-            Height = 56,
+            AutoSize = true,
+            AutoSizeMode = AutoSizeMode.GrowAndShrink,
+            Anchor = AnchorStyles.Left | AnchorStyles.Right,
             FlatStyle = FlatStyle.Flat,
             BackColor = Color.White,
             ForeColor = Theme.TitleText,
             TextAlign = ContentAlignment.MiddleLeft,
             Font = Theme.Font(9.5f),
-            Padding = new Padding(12, 0, 0, 0),
-            Cursor = Cursors.Hand,
+            Padding = new Padding(12, 8, 12, 8),
             Margin = new Padding(0, 0, 0, 6),
+            Cursor = Cursors.Hand,
             TabStop = false,
-        };
+        }, () => vm.OpenProjectCommand.Execute(summary));
         button.FlatAppearance.BorderColor = Theme.CardBorder;
         button.FlatAppearance.BorderSize = 1;
-        button.Click += (_, _) => vm.OpenProjectCommand.Execute(summary);
+        return button;
+    }
+
+    private static Button WithClick(Button button, Action onClick)
+    {
+        button.Click += (_, _) => onClick();
         return button;
     }
 }
