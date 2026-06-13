@@ -13,9 +13,22 @@ namespace SurveyAnalysis.WinForms;
 // height comes from AutoSize + Padding — so spacing and DPI scaling are handled by the framework.
 internal sealed class WelcomeControl : UserControl
 {
-    // The card's content width: a wrap boundary for the body text that also sets the card/button width.
-    // A logical value the form's font auto-scale converts for the current DPI.
-    private const int CardWidth = 360;
+    // The heading text; its natural one-line width drives the whole card's width (below).
+    private const string HeadingText = "プロジェクトを開始しましょう";
+
+    // The card's content width = the heading's natural one-line width, so the heading never wraps and
+    // the body text / buttons line up exactly under it. Measured once at 96 dpi (a default Bitmap's
+    // resolution) so the value is logical — the form's auto-scale then converts it for the monitor.
+    internal static readonly int ContentWidth = MeasureHeadingWidth();
+
+    private static int MeasureHeadingWidth()
+    {
+        using var bitmap = new Bitmap(1, 1); // 96 dpi by default → the result is in logical pixels
+        using var graphics = Graphics.FromImage(bitmap);
+        using var font = Theme.Font(20f, FontStyle.Bold);
+        // Round up with a little slack so the heading stays on one line under the card's fixed width.
+        return (int)Math.Ceiling(graphics.MeasureString(HeadingText, font).Width) + 8;
+    }
 
     public WelcomeControl(WelcomeViewModel vm)
     {
@@ -39,9 +52,10 @@ internal sealed class WelcomeControl : UserControl
             Anchor = AnchorStyles.None,
             BackColor = Theme.ContentBack,
         };
-        card.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
+        // A fixed-width column = the heading width, so every row (body text, buttons) shares it.
+        card.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, ContentWidth));
 
-        card.Controls.Add(Title("プロジェクトを開始しましょう"));
+        card.Controls.Add(Title(HeadingText));
         card.Controls.Add(Body("プロジェクトを作成すると、スキャン画像の読み込み・トピック割り当て・感情分析・月次レポートを管理できます。"));
 
         if (vm.HasRecentProjects)
@@ -65,7 +79,9 @@ internal sealed class WelcomeControl : UserControl
         Font = Theme.Font(20f, FontStyle.Bold),
         ForeColor = Theme.TitleText,
         AutoSize = true,
-        MaximumSize = new Size(CardWidth, 0),
+        // GDI+ rendering so the on-screen width matches the GDI+ measurement that sized the card.
+        UseCompatibleTextRendering = true,
+        MaximumSize = new Size(ContentWidth, 0),
         Margin = new Padding(0, 0, 0, 8),
     };
 
@@ -75,7 +91,7 @@ internal sealed class WelcomeControl : UserControl
         Font = Theme.Font(9.5f),
         ForeColor = Theme.BodyText,
         AutoSize = true,
-        MaximumSize = new Size(CardWidth, 0),
+        MaximumSize = new Size(ContentWidth, 0),
         Margin = new Padding(0, 0, 0, 16),
     };
 
@@ -111,7 +127,6 @@ internal sealed class WelcomeControl : UserControl
         button.BackColor = Theme.Accent;
         button.ForeColor = Theme.AccentText;
         button.FlatAppearance.BorderSize = 0;
-        button.Margin = new Padding(0, 10, 0, 0);
         return button;
     }
 

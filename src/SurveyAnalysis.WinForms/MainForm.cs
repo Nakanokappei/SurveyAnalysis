@@ -19,6 +19,12 @@ public sealed class MainForm : Form
     private readonly Panel _content = new() { Dock = DockStyle.Fill, BackColor = Theme.ContentBack };
     private readonly Panel _sidebar = new() { Dock = DockStyle.Left, Width = 300, BackColor = Theme.SidebarBack };
 
+    // The left indent (DIP) where a nav item's text begins = the button's left margin (8) plus its left
+    // padding (8). Section labels carry no padding, so they use this same indent to line their text up
+    // with the item text. 16 DIP matches the (just-right) top inset, so the content sits a uniform 16
+    // DIP from the sidebar edges. Applied via LogicalToDeviceUnits so the alignment holds at any DPI.
+    private const int NavTextIndentDip = 16;
+
     public MainForm()
     {
         // Scale the layout by the monitor DPI so text never clips at >100% Windows scaling.
@@ -26,7 +32,13 @@ public sealed class MainForm : Form
         AutoScaleMode = AutoScaleMode.Dpi;
 
         Text = "アンケート分析";
-        ClientSize = new Size(1165, 720);
+        // Default window width is derived from the welcome card so its heading fits on one line: the
+        // content pane (the welcome card plus a gutter each side) is 3/4 of the window and the sidebar
+        // takes the remaining quarter, so window = (card + gutters) × 4/3. A logical value the form's
+        // auto-scale converts for the monitor; height stays fixed.
+        const int Gutter = 40;
+        var contentWidth = WelcomeControl.ContentWidth + Gutter * 2;
+        ClientSize = new Size(contentWidth * 4 / 3, 720);
         StartPosition = FormStartPosition.CenterScreen;
         Font = Theme.Font();
         BackColor = Theme.ContentBack;
@@ -86,18 +98,23 @@ public sealed class MainForm : Form
         _sidebar.SuspendLayout();
         _sidebar.Controls.Clear();
 
-        // A Dock=Left width is not reliably auto-scaled on its own, so convert the design width for the
-        // current DPI to keep the long "プロジェクトを閉じる" label from clipping. The buttons inside no
-        // longer carry explicit sizes — they AutoSize their height from the (point) font and stretch to
-        // the column via Anchor — so this is the sidebar's only DPI-sensitive value.
-        _sidebar.Width = LogicalToDeviceUnits(300);
+        // With a project open the sidebar carries the long "プロジェクトを閉じる" label, so it keeps the
+        // design width (converted for the current DPI, since a Dock=Left width is not auto-scaled on its
+        // own). Empty (the welcome screen) it holds almost nothing, so a quarter of the window is plenty.
+        // The quarter is taken from the current ClientSize — logical on the first build (then scaled with
+        // the form) or device pixels on a later open/close rebuild — so the ratio holds either way.
+        _sidebar.Width = _shell.IsProjectOpen
+            ? LogicalToDeviceUnits(300)
+            : ClientSize.Width / 4;
 
         // Bottom actions (docked bottom): import / close while a project is open, then 設定 (app-wide).
         var bottom = NavStack();
         bottom.Dock = DockStyle.Bottom;
         bottom.AutoSize = true;
         bottom.AutoSizeMode = AutoSizeMode.GrowAndShrink;
-        bottom.Padding = new Padding(0, LogicalToDeviceUnits(8), 0, LogicalToDeviceUnits(12));
+        // Bottom inset = 16 DIP to match the top: the 設定 button adds 8 (its bottom padding) + 1 (its
+        // bottom margin) below its text, so the panel contributes the remaining 7.
+        bottom.Padding = new Padding(0, LogicalToDeviceUnits(8), 0, LogicalToDeviceUnits(7));
         if (_shell.IsProjectOpen)
         {
             AddRow(bottom, NavButton("＋ インポート (CSV)", () => _shell.ImportCommand.Execute(null)));
@@ -116,10 +133,10 @@ public sealed class MainForm : Form
         {
             Text = "プロジェクト",
             ForeColor = Color.White,
-            Font = Theme.Font(13.5f, FontStyle.Bold),
+            Font = Theme.Font(10f, FontStyle.Bold),
             AutoSize = true,
             Anchor = AnchorStyles.Left,
-            Margin = new Padding(16, 4, 16, 2),
+            Margin = new Padding(LogicalToDeviceUnits(NavTextIndentDip), 4, 16, 2),
         });
         if (_shell.IsProjectOpen && _shell.CurrentProject is { } project)
             AddRow(nav, new Label
@@ -129,7 +146,7 @@ public sealed class MainForm : Form
                 Font = Theme.Font(9f),
                 AutoSize = true,
                 Anchor = AnchorStyles.Left,
-                Margin = new Padding(16, 0, 16, 8),
+                Margin = new Padding(LogicalToDeviceUnits(NavTextIndentDip), 0, 16, 8),
             });
 
         if (_shell.IsProjectOpen)
@@ -196,7 +213,7 @@ public sealed class MainForm : Form
             TextAlign = ContentAlignment.MiddleLeft,
             Font = Theme.Font(10f),
             Margin = new Padding(LogicalToDeviceUnits(8), LogicalToDeviceUnits(1), LogicalToDeviceUnits(8), LogicalToDeviceUnits(1)),
-            Padding = new Padding(LogicalToDeviceUnits(10), LogicalToDeviceUnits(8), LogicalToDeviceUnits(6), LogicalToDeviceUnits(8)),
+            Padding = new Padding(LogicalToDeviceUnits(8), LogicalToDeviceUnits(8), LogicalToDeviceUnits(6), LogicalToDeviceUnits(8)),
             Cursor = Cursors.Hand,
             TabStop = false,
         };
@@ -216,15 +233,16 @@ public sealed class MainForm : Form
         return button;
     }
 
-    // A dim section heading ("切り口") above a group of nav buttons.
-    private static Label SectionLabel(string text) => new()
+    // A dim section heading ("切り口") above a group of nav buttons; its text lines up with the item text
+    // below it via the shared nav indent. Instance method so it can convert that indent for the DPI.
+    private Label SectionLabel(string text) => new()
     {
         Text = text,
         ForeColor = Theme.SectionHeader,
         Font = Theme.Font(8.5f, FontStyle.Bold),
         AutoSize = true,
         Anchor = AnchorStyles.Left,
-        Margin = new Padding(16, 12, 0, 4),
+        Margin = new Padding(LogicalToDeviceUnits(NavTextIndentDip), 12, 0, 4),
     };
 
     // A thin divider line between the project actions and 設定 (stretches to the column).
