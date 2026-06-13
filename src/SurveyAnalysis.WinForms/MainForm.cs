@@ -32,13 +32,10 @@ public sealed class MainForm : Form
         AutoScaleMode = AutoScaleMode.Dpi;
 
         Text = "アンケート分析";
-        // Default window width is derived from the welcome card so its heading fits on one line: the
-        // content pane (the welcome card plus a gutter each side) is 3/4 of the window and the sidebar
-        // takes the remaining quarter, so window = (card + gutters) × 4/3. A logical value the form's
-        // auto-scale converts for the monitor; height stays fixed.
-        const int Gutter = 40;
-        var contentWidth = WelcomeControl.ContentWidth + Gutter * 2;
-        ClientSize = new Size(contentWidth * 4 / 3, 720);
+        // Client area at near-golden-ratio proportions: 970 × 600 DIP (970/600 ≈ 1.617 ≈ φ). Expressed
+        // in DIP via LogicalToDeviceUnits so the window is the intended size at any DPI scaling (raw
+        // literals would be device px on this PerMonitorV2 setup — see the sidebar indent note).
+        ClientSize = new Size(LogicalToDeviceUnits(970), LogicalToDeviceUnits(600));
         StartPosition = FormStartPosition.CenterScreen;
         Font = Theme.Font();
         BackColor = Theme.ContentBack;
