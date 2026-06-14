@@ -16,7 +16,7 @@ public enum FieldAggregation
 public static class FieldAggregationInfo
 {
     // The aggregation for a field, derived from its type. Sentiment-analysis fields average their
-    // score; 数値 sums; 選択肢(数値) averages (a rating scale); every other type counts distinct values.
+    // score; 数値 sums; every other type (選択肢・テキスト・文章 etc.) counts distinct values.
     public static FieldAggregation For(DataField field)
     {
         if (field.Analysis == AnalysisMethod.Sentiment)
@@ -24,7 +24,6 @@ public static class FieldAggregationInfo
         return field.FieldType switch
         {
             FieldType.Number => FieldAggregation.Sum,
-            FieldType.ChoiceNumber => FieldAggregation.Average,
             _ => FieldAggregation.DistinctCount,
         };
     }

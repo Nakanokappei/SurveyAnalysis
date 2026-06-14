@@ -23,10 +23,9 @@ public sealed class AnalyticsRepository
     public static string? DateField(Project project) =>
         project.Fields.FirstOrDefault(f => f.UseForAggregation)?.Name;
 
-    // An address / prefecture / city field drives the region dimension.
+    // An address field drives the region dimension.
     public static string? RegionField(Project project) =>
-        project.Fields.FirstOrDefault(f =>
-            f.FieldType is FieldType.Address or FieldType.PrefectureOnly or FieldType.CityOnly)?.Name;
+        project.Fields.FirstOrDefault(f => f.FieldType is FieldType.Address)?.Name;
 
     // A topic-assignment field drives the topic dimension (populated once LLM analysis exists).
     public static string? TopicField(Project project) =>

@@ -36,10 +36,11 @@ internal sealed class ProjectDesignForm : Form
 
         _vm = vm;
         Text = vm.DialogTitle;
-        MaximizeBox = false;  // dialogs are not maximizable
-        ClientSize = new Size(900, 640);
+        // This dialog holds a wide table, so it is resizable and maximizable.
+        MaximizeBox = true;
+        ClientSize = new Size(LogicalToDeviceUnits(800), LogicalToDeviceUnits(500));
         StartPosition = FormStartPosition.CenterParent;
-        MinimumSize = new Size(720, 480);
+        MinimumSize = new Size(LogicalToDeviceUnits(560), LogicalToDeviceUnits(320));
         Font = Theme.Font();
         BackColor = ColorTranslator.FromHtml("#F8FAFC");
 
@@ -88,6 +89,7 @@ internal sealed class ProjectDesignForm : Form
         AddSection(stack, _intro);
         AddSection(stack, nameCard);
         AddSection(stack, _header);
+        AddSection(stack, BuildColumnHeader());
         AddSection(stack, _fields);
         AddSection(stack, _addField);
         _content.Controls.Add(stack);
@@ -109,6 +111,42 @@ internal sealed class ProjectDesignForm : Form
         // Fill added first so it yields the bottom edge to the docked action bar.
         Controls.Add(_content);
         Controls.Add(bar);
+    }
+
+    // The table's column header: the 10 captions over the field rows, using the same shared columns so
+    // they align. Captions wrap within their fixed-width columns; the long boolean headers therefore
+    // stack onto a few lines.
+    private static Control BuildColumnHeader()
+    {
+        var header = new TableLayoutPanel
+        {
+            Dock = DockStyle.Top, RowCount = 1,
+            AutoSize = true, AutoSizeMode = AutoSizeMode.GrowAndShrink,
+            Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right,
+            BackColor = ColorTranslator.FromHtml("#F1F5F9"),
+            Margin = new Padding(0, 0, 0, 2), Padding = new Padding(0, 4, 0, 4),
+        };
+        FieldRowControl.DefineColumns(header);
+        header.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+
+        var captions = new[]
+        {
+            "#", "項目名", "データ型", "分析方法", "月次集計に使う",
+            "読み込み日をデフォルトにする", "アラートを発報する", "アラート閾値", "暗号化・非表示", "削除",
+        };
+        for (var i = 0; i < captions.Length; i++)
+        {
+            var caption = new Label
+            {
+                Text = captions[i], AutoSize = true, ForeColor = Theme.Muted, Font = Theme.Font(8.5f, FontStyle.Bold),
+                Anchor = AnchorStyles.None, Margin = new Padding(2, 0, 2, 0), TextAlign = ContentAlignment.MiddleCenter,
+            };
+            var width = FieldRowControl.ColumnWidths[i];
+            if (width > 0)
+                caption.MaximumSize = new Size(width - 4, 0);  // wrap inside the fixed column
+            header.Controls.Add(caption, i, 0);
+        }
+        return header;
     }
 
     // A 1-column AutoSize stack whose children flow downward; each child anchors to fill the width.
@@ -173,9 +211,10 @@ internal sealed class ProjectDesignForm : Form
         _fields.Controls.Clear();
         _fields.RowStyles.Clear();
         _fields.RowCount = 0;
+        var ordinal = 1;
         foreach (var field in _vm.Fields)
         {
-            var row = new FieldRowControl(field, f => _vm.RemoveFieldCommand.Execute(f));
+            var row = new FieldRowControl(field, ordinal++, f => _vm.RemoveFieldCommand.Execute(f));
             _fields.RowStyles.Add(new RowStyle(SizeType.AutoSize));
             _fields.Controls.Add(row, 0, _fields.RowCount);
             _fields.RowCount++;

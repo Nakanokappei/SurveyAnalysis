@@ -196,12 +196,9 @@ public partial class ProjectDesignViewModel : ViewModelBase
     private static string SampleExtraction(DataField field) => field.FieldType switch
     {
         FieldType.Date => "2026/05/28",
-        FieldType.ChoiceText => "とても満足",
-        FieldType.ChoiceNumber => "5",
+        FieldType.Choice => "とても満足",
         FieldType.Number => "4",
-        FieldType.PrefectureOnly => "東京都",
-        FieldType.CityOnly => "新宿区",
-        FieldType.PostalCodeOnly => "160-0022",
+        FieldType.Text => "丁寧でした",
         FieldType.FreeText => "担当の方が丁寧に説明してくれて安心できました。",
         _ => "（サンプル値）"
     };

@@ -179,7 +179,7 @@ public sealed class ProjectRepository
                 project.Fields.Add(new DataField
                 {
                     Name = reader.GetString(0),
-                    FieldType = Enum.Parse<FieldType>(reader.GetString(1)),
+                    FieldType = FieldTypeInfo.ParseStored(reader.GetString(1)),
                     Analysis = Enum.Parse<AnalysisMethod>(reader.GetString(2)),
                     UseForAggregation = reader.GetInt32(3) != 0,
                     UseLoadDateAsDefault = reader.GetInt32(4) != 0,

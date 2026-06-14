@@ -14,8 +14,8 @@ public static class SampleData
 
         project.Fields.Add(new DataField { Name = "氏名", FieldType = FieldType.Name, Analysis = AnalysisMethod.None });
         project.Fields.Add(new DataField { Name = "記入日", FieldType = FieldType.Date, Analysis = AnalysisMethod.None, UseForAggregation = true });
-        project.Fields.Add(new DataField { Name = "工事内容", FieldType = FieldType.ChoiceText, Analysis = AnalysisMethod.Topic });
-        project.Fields.Add(new DataField { Name = "スタッフ対応", FieldType = FieldType.ChoiceText, Analysis = AnalysisMethod.Sentiment });
+        project.Fields.Add(new DataField { Name = "工事内容", FieldType = FieldType.Choice, Analysis = AnalysisMethod.Topic });
+        project.Fields.Add(new DataField { Name = "スタッフ対応", FieldType = FieldType.Choice, Analysis = AnalysisMethod.Sentiment });
         project.Fields.Add(new DataField { Name = "ご意見・ご要望", FieldType = FieldType.FreeText, Analysis = AnalysisMethod.Sentiment });
         project.Fields.Add(new DataField { Name = "連絡先電話番号", FieldType = FieldType.Phone, Analysis = AnalysisMethod.None });
 

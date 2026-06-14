@@ -22,7 +22,7 @@ public class ImportViewModelTests
 
         var project = new Project { Name = "工事アンケート" };
         project.Fields.Add(new DataField { Name = "記入日", FieldType = FieldType.Date, UseForAggregation = true });
-        project.Fields.Add(new DataField { Name = "都道府県", FieldType = FieldType.PrefectureOnly });
+        project.Fields.Add(new DataField { Name = "都道府県", FieldType = FieldType.Address });
         project.Fields.Add(new DataField { Name = "ご意見", FieldType = FieldType.FreeText });
         projects.Insert(project);
 

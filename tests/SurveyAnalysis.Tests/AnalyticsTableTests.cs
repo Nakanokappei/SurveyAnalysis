@@ -13,8 +13,8 @@ public class AnalyticsTableTests
 {
     [Theory]
     [InlineData(FieldType.Number, AnalysisMethod.None, FieldAggregation.Sum)]
-    [InlineData(FieldType.ChoiceNumber, AnalysisMethod.None, FieldAggregation.Average)]
-    [InlineData(FieldType.PrefectureOnly, AnalysisMethod.None, FieldAggregation.DistinctCount)]
+    [InlineData(FieldType.Choice, AnalysisMethod.None, FieldAggregation.DistinctCount)]
+    [InlineData(FieldType.Text, AnalysisMethod.None, FieldAggregation.DistinctCount)]
     [InlineData(FieldType.Date, AnalysisMethod.None, FieldAggregation.DistinctCount)]
     [InlineData(FieldType.Name, AnalysisMethod.None, FieldAggregation.DistinctCount)]
     [InlineData(FieldType.FreeText, AnalysisMethod.Sentiment, FieldAggregation.SentimentAverage)]
@@ -36,9 +36,9 @@ public class AnalyticsTableTests
 
         var project = new Project { Name = "P" };
         project.Fields.Add(new DataField { Name = "記入日", FieldType = FieldType.Date, UseForAggregation = true });
-        project.Fields.Add(new DataField { Name = "都道府県", FieldType = FieldType.PrefectureOnly });
+        project.Fields.Add(new DataField { Name = "都道府県", FieldType = FieldType.Address });
         project.Fields.Add(new DataField { Name = "評価", FieldType = FieldType.Number });
-        project.Fields.Add(new DataField { Name = "満足度", FieldType = FieldType.ChoiceNumber });
+        project.Fields.Add(new DataField { Name = "満足度", FieldType = FieldType.Choice });
         project.Fields.Add(new DataField { Name = "ご意見", FieldType = FieldType.FreeText, Analysis = AnalysisMethod.Sentiment });
         var pid = projects.Insert(project);
 
@@ -67,15 +67,15 @@ public class AnalyticsTableTests
         Assert.Equal("2026年度", year.Label);
         Assert.Equal(3, year.Count);
         // 記入日=種類数(3 distinct dates), 都道府県=種類数(東京都/大阪府=2), 評価=合計(3+5+2=10),
-        // 満足度=平均((4+2+5)/3=3.7), ご意見=感情平均(no LLM score yet → —).
-        Assert.Equal(new[] { "3", "2", "10", "3.7", "—" }, year.Cells);
+        // 満足度=種類数(4/2/5=3 distinct), ご意見=感情平均(no LLM score yet → —).
+        Assert.Equal(new[] { "3", "2", "10", "3", "—" }, year.Cells);
 
         // 全体 row: each column aggregated over all responses with its own method — 記入日種類数=3,
-        // 都道府県種類数=2 (東京都/大阪府), 評価合計=10, 満足度平均=3.7, ご意見感情平均=—. (One group here,
+        // 都道府県種類数=2 (東京都/大阪府), 評価合計=10, 満足度種類数=3, ご意見感情平均=—. (One group here,
         // so the total equals that group's cells.)
         Assert.Equal("全体", table.Total.Label);
         Assert.Equal(3, table.Total.Count);
-        Assert.Equal(new[] { "3", "2", "10", "3.7", "—" }, table.Total.Cells);
+        Assert.Equal(new[] { "3", "2", "10", "3", "—" }, table.Total.Cells);
     }
 
     [Fact]
@@ -88,11 +88,12 @@ public class AnalyticsTableTests
         Assert.Equal("東京都", table.Rows[0].Label); // largest group first
         var tokyo = table.Rows.Single(r => r.Label == "東京都");
 
-        // 東京都 has two responses (05/11 評価3, 05/18 評価2): 都道府県種類数=1, 評価合計=5, 満足度平均=(4+5)/2=4.5.
+        // 東京都 has two responses (05/11 評価3 満足度4, 05/18 評価2 満足度5): 都道府県種類数=1, 評価合計=5,
+        // 満足度種類数={4,5}=2.
         Assert.Equal(2, tokyo.Count);
         Assert.Equal("1", tokyo.Cells[1]); // 都道府県 distinct
         Assert.Equal("5", tokyo.Cells[2]); // 評価 sum
-        Assert.Equal("4.5", tokyo.Cells[3]); // 満足度 average
+        Assert.Equal("2", tokyo.Cells[3]); // 満足度 distinct
     }
 
     [Fact]
@@ -105,7 +106,7 @@ public class AnalyticsTableTests
 
         var project = new Project { Name = "P" };
         project.Fields.Add(new DataField { Name = "記入日", FieldType = FieldType.Date, UseForAggregation = true });
-        project.Fields.Add(new DataField { Name = "都道府県", FieldType = FieldType.PrefectureOnly });
+        project.Fields.Add(new DataField { Name = "都道府県", FieldType = FieldType.Address });
         var pid = projects.Insert(project);
         responses.InsertResponses(pid, "t.csv", new[]
         {

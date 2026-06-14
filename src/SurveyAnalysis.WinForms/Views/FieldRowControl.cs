@@ -6,158 +6,100 @@ using SurveyAnalysis.Models;
 
 namespace SurveyAnalysis.WinForms;
 
-// One survey-field row in the project design dialog — the WinForms counterpart of the field card in
-// ProjectDesignView.axaml. Holds 項目名 / データ型 / 分析方法, the 🔒 PII badge, the date-aggregation
-// checkboxes, and (for sentiment) the alert toggle and threshold. It edits its DataField live and
-// reflows when the field's computed flags change (type → PII/date, analysis → sentiment): the optional
-// sub-blocks toggle Visible and the AutoSize layout grows/shrinks the card. No manual coordinates —
-// only layout containers (TableLayoutPanel / FlowLayoutPanel + Anchor) and a Paint-drawn soft border.
-internal sealed class FieldRowControl : Panel
+// One survey-field row, laid out as a single row of a 10-column table (the project design dialog now
+// shows the data items as a table instead of per-field cards). The columns are shared with the header
+// row in ProjectDesignForm via DefineColumns, so everything lines up. Cells that only apply to certain
+// kinds of field are disabled when not applicable (月次集計 / 読み込み日 for 日付; アラート / 閾値 for
+// 感情), and the 暗号化 cell shows 🔒 only for personal-information types. Edits flow straight to the
+// DataField; the row re-syncs when the field's computed flags change.
+internal sealed class FieldRowControl : TableLayoutPanel
 {
     private readonly DataField _field;
-    private readonly TextBox _name = new() { Font = Theme.Font(9.5f), Anchor = AnchorStyles.Left | AnchorStyles.Right, Margin = new Padding(0, 2, 0, 0) };
+    private readonly TextBox _name = new() { Font = Theme.Font(9.5f), Anchor = AnchorStyles.Left | AnchorStyles.Right, Margin = new Padding(2, 0, 2, 0) };
     private readonly EnumCombo<FieldType> _type;
     private readonly EnumCombo<AnalysisMethod> _analysis;
-    private readonly Label _pii = new()
+    private readonly CheckBox _useForAggregation = NewCheck();
+    private readonly CheckBox _useLoadDate = NewCheck();
+    private readonly CheckBox _enableAlert = NewCheck();
+    private readonly NumericUpDown _threshold = new()
     {
-        Text = "🔒 暗号化・非表示",
-        AutoSize = true,
-        BackColor = ColorTranslator.FromHtml("#FEF3C7"),
-        ForeColor = ColorTranslator.FromHtml("#92400E"),
-        Font = Theme.Font(8.5f),
-        Padding = new Padding(6, 3, 6, 3),
-        Margin = new Padding(0, 0, 0, 6),
+        Minimum = -0.9m, Maximum = 0.5m, Increment = 0.1m, DecimalPlaces = 1,
+        Font = Theme.Font(9.5f), TextAlign = HorizontalAlignment.Right,
+        Anchor = AnchorStyles.None, Width = 56,
     };
-    private readonly CheckBox _useForAggregation = new() { Text = "月次集計に使う", AutoSize = true, Font = Theme.Font(8.5f), Margin = new Padding(0, 0, 0, 2) };
-    private readonly CheckBox _useLoadDate = new() { Text = "読み込み日をデフォルトにする", AutoSize = true, Font = Theme.Font(8.5f), Margin = new Padding(0, 0, 0, 2) };
-    private readonly CheckBox _enableAlert = new() { Text = "アラートを発報する", AutoSize = true, Font = Theme.Font(9.5f), Margin = new Padding(0, 0, 0, 4) };
-    private readonly TrackBar _threshold = new() { Minimum = -9, Maximum = 5, TickFrequency = 1, Width = 220, AutoSize = false, Height = 32, Anchor = AnchorStyles.Left };
-    private readonly Label _thresholdValue = new() { AutoSize = true, ForeColor = Theme.Danger, Font = Theme.Font(9.5f, FontStyle.Bold), Anchor = AnchorStyles.Left, Margin = new Padding(0, 0, 0, 0) };
-
-    // Optional sub-blocks, toggled by the field's computed flags; AutoSize lets the card reflow.
-    private readonly FlowLayoutPanel _typeExtras;   // PII badge + date checkboxes, under データ型
-    private readonly TableLayoutPanel _sentiment;   // alert toggle + threshold, full width
-    private readonly TableLayoutPanel _thresholdRow;
+    private readonly Label _pii = new() { Text = "🔒", AutoSize = true, ForeColor = ColorTranslator.FromHtml("#92400E"), Font = Theme.Font(11f), Anchor = AnchorStyles.None, Margin = Padding.Empty };
 
     private bool _syncing;
 
-    public FieldRowControl(DataField field, Action<DataField> onRemove)
+    // The 10 shared columns: 項目番号, 項目名, データ型, 分析方法, 月次集計, 読み込み日, アラート, 閾値,
+    // 暗号化, 削除. Width 0 = the flexible (Percent) column (項目名); the rest are fixed pixel widths. Used
+    // by both the header row (ProjectDesignForm) and every field row so they line up. Pixel widths — this
+    // dialog renders unscaled, like the rest of the app.
+    public static readonly int[] ColumnWidths = { 44, 0, 150, 140, 92, 112, 92, 80, 84, 64 };
+
+    public static void DefineColumns(TableLayoutPanel t)
+    {
+        t.ColumnCount = ColumnWidths.Length;
+        t.ColumnStyles.Clear();
+        foreach (var width in ColumnWidths)
+            t.ColumnStyles.Add(width == 0 ? new ColumnStyle(SizeType.Percent, 100) : new ColumnStyle(SizeType.Absolute, width));
+    }
+
+    public FieldRowControl(DataField field, int ordinal, Action<DataField> onRemove)
     {
         _field = field;
 
-        // The card stretches to its parent column (Anchor) and sizes its height to the visible content.
+        DefineColumns(this);
+        RowCount = 1;
+        RowStyles.Add(new RowStyle(SizeType.AutoSize));
         AutoSize = true;
         AutoSizeMode = AutoSizeMode.GrowAndShrink;
         Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right;
         BackColor = Color.White;
-        Margin = new Padding(0, 0, 0, 12);
-        ResizeRedraw = true;   // keep the painted border crisp as the card reflows
+        Margin = Padding.Empty;            // rows sit flush; a separator line is painted at the bottom
+        Padding = new Padding(0, 4, 0, 4);
+        ResizeRedraw = true;
 
-        _type = new EnumCombo<FieldType>(FieldTypeInfo.Label, v => _field.FieldType = v) { Anchor = AnchorStyles.Left | AnchorStyles.Right, Margin = new Padding(0, 2, 0, 0) };
-        _analysis = new EnumCombo<AnalysisMethod>(FieldTypeInfo.Label, v => _field.Analysis = v) { Anchor = AnchorStyles.Left | AnchorStyles.Right, Margin = new Padding(0, 2, 0, 0) };
+        _type = new EnumCombo<FieldType>(FieldTypeInfo.Label, v => _field.FieldType = v) { Anchor = AnchorStyles.Left | AnchorStyles.Right, Margin = new Padding(2, 0, 2, 0) };
+        _analysis = new EnumCombo<AnalysisMethod>(FieldTypeInfo.Label, v => _field.Analysis = v) { Anchor = AnchorStyles.Left | AnchorStyles.Right, Margin = new Padding(2, 0, 2, 0) };
 
-        // Top line: captions over their inputs in three percentage columns, 削除 in a trailing AutoSize
-        // column (sized to the button first, so the inputs share the remaining width 40/30/30).
-        var top = new TableLayoutPanel
-        {
-            ColumnCount = 4, RowCount = 2,
-            AutoSize = true, AutoSizeMode = AutoSizeMode.GrowAndShrink,
-            Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right,
-            Margin = Padding.Empty,
-        };
-        top.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 40));
-        top.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 30));
-        top.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 30));
-        top.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
-        top.RowStyles.Add(new RowStyle(SizeType.AutoSize));
-        top.RowStyles.Add(new RowStyle(SizeType.AutoSize));
-        top.Controls.Add(Caption("項目名"), 0, 0);
-        top.Controls.Add(Caption("データ型"), 1, 0);
-        top.Controls.Add(Caption("分析方法"), 2, 0);
-        top.Controls.Add(_name, 0, 1);
-        top.Controls.Add(_type, 1, 1);
-        top.Controls.Add(_analysis, 2, 1);
+        var ordinalLabel = new Label { Text = ordinal.ToString(), AutoSize = true, ForeColor = Theme.Muted, Font = Theme.Font(9.5f), Anchor = AnchorStyles.None, Margin = Padding.Empty };
 
         var remove = new Button
         {
             Text = "削除", AutoSize = true, FlatStyle = FlatStyle.Flat,
             ForeColor = Theme.Danger, BackColor = Color.White, Font = Theme.Font(9f),
-            Cursor = Cursors.Hand, Anchor = AnchorStyles.Left,
-            Margin = new Padding(12, 2, 0, 0), Padding = new Padding(10, 3, 10, 3),
+            Cursor = Cursors.Hand, Anchor = AnchorStyles.None, Margin = Padding.Empty, Padding = new Padding(8, 2, 8, 2),
         };
         remove.FlatAppearance.BorderColor = ColorTranslator.FromHtml("#FCA5A5");
         remove.Click += (_, _) => onRemove(_field);
-        top.Controls.Add(remove, 3, 1);
 
-        // Optional block under データ型: PII badge then the two date-aggregation checkboxes.
-        _typeExtras = new FlowLayoutPanel
-        {
-            FlowDirection = FlowDirection.TopDown, WrapContents = false,
-            AutoSize = true, AutoSizeMode = AutoSizeMode.GrowAndShrink,
-            Anchor = AnchorStyles.Top | AnchorStyles.Left, Margin = new Padding(0, 8, 0, 0),
-        };
-        _typeExtras.Controls.Add(_pii);
-        _typeExtras.Controls.Add(_useForAggregation);
-        _typeExtras.Controls.Add(_useLoadDate);
+        // One cell per column.
+        Controls.Add(ordinalLabel, 0, 0);
+        Controls.Add(_name, 1, 0);
+        Controls.Add(_type, 2, 0);
+        Controls.Add(_analysis, 3, 0);
+        Controls.Add(_useForAggregation, 4, 0);
+        Controls.Add(_useLoadDate, 5, 0);
+        Controls.Add(_enableAlert, 6, 0);
+        Controls.Add(_threshold, 7, 0);
+        Controls.Add(_pii, 8, 0);
+        Controls.Add(remove, 9, 0);
 
-        // Threshold row: caption | slider | value | trailing note, each vertically centred (Anchor=Left
-        // with no Top/Bottom centres within the slider-tall AutoSize row).
-        _thresholdRow = new TableLayoutPanel
-        {
-            ColumnCount = 4, RowCount = 1,
-            AutoSize = true, AutoSizeMode = AutoSizeMode.GrowAndShrink,
-            Anchor = AnchorStyles.Left, Margin = Padding.Empty,
-        };
-        for (var i = 0; i < 4; i++)
-            _thresholdRow.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
-        _thresholdRow.RowStyles.Add(new RowStyle(SizeType.AutoSize));
-        _thresholdRow.Controls.Add(new Label { Text = "アラート閾値", AutoSize = true, ForeColor = Theme.Muted, Font = Theme.Font(8.5f), Anchor = AnchorStyles.Left, Margin = new Padding(0, 0, 8, 0) }, 0, 0);
-        _thresholdRow.Controls.Add(_threshold, 1, 0);
-        _thresholdRow.Controls.Add(_thresholdValue, 2, 0);
-        _thresholdRow.Controls.Add(new Label { Text = "を下回ると担当者へ通知", AutoSize = true, ForeColor = Theme.Muted, Font = Theme.Font(8.5f), Anchor = AnchorStyles.Left, Margin = new Padding(8, 0, 0, 0) }, 3, 0);
-
-        // Sentiment alert block: the toggle, then (conditionally) the threshold row beneath it.
-        _sentiment = new TableLayoutPanel
-        {
-            ColumnCount = 1,
-            AutoSize = true, AutoSizeMode = AutoSizeMode.GrowAndShrink,
-            Anchor = AnchorStyles.Top | AnchorStyles.Left, Margin = new Padding(0, 8, 0, 0),
-        };
-        _sentiment.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
-        _sentiment.Controls.Add(_enableAlert);
-        _sentiment.Controls.Add(_thresholdRow);
-
-        // Root stack inside the card: top line, then the two optional sub-blocks. Dock=Top + AutoSize
-        // so the card (AutoSize) grows to the content and reflows when a sub-block toggles.
-        var root = new TableLayoutPanel
-        {
-            Dock = DockStyle.Top, ColumnCount = 1, RowCount = 3,
-            AutoSize = true, AutoSizeMode = AutoSizeMode.GrowAndShrink,
-            Padding = new Padding(14), BackColor = Color.White,
-        };
-        root.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
-        root.RowStyles.Add(new RowStyle(SizeType.AutoSize));
-        root.RowStyles.Add(new RowStyle(SizeType.AutoSize));
-        root.RowStyles.Add(new RowStyle(SizeType.AutoSize));
-        root.Controls.Add(top, 0, 0);
-        root.Controls.Add(_typeExtras, 0, 1);
-        root.Controls.Add(_sentiment, 0, 2);
-        Controls.Add(root);
-
-        // Initial values + visibility.
+        // Initial values.
         _name.Text = _field.Name;
         _type.SelectValue(_field.FieldType);
         _analysis.SelectValue(_field.Analysis);
         SyncCheckboxes();
         SyncThreshold();
-        SyncVisibility();
+        SyncEnabled();
 
         // Edits flow back to the field.
         _name.TextChanged += (_, _) => { if (!_syncing) _field.Name = _name.Text; };
         _useForAggregation.CheckedChanged += (_, _) => { if (!_syncing) _field.UseForAggregation = _useForAggregation.Checked; };
         _useLoadDate.CheckedChanged += (_, _) => { if (!_syncing) _field.UseLoadDateAsDefault = _useLoadDate.Checked; };
         _enableAlert.CheckedChanged += (_, _) => { if (!_syncing) _field.EnableAlert = _enableAlert.Checked; };
-        _threshold.Scroll += (_, _) => { if (!_syncing) _field.AlertThreshold = _threshold.Value / 10.0; };
+        _threshold.ValueChanged += (_, _) => { if (!_syncing) _field.AlertThreshold = (double)_threshold.Value; };
 
         _field.PropertyChanged += OnFieldChanged;
     }
@@ -169,29 +111,17 @@ internal sealed class FieldRowControl : Panel
         base.Dispose(disposing);
     }
 
-    // Soft card border (#E2E8F0) instead of BorderStyle.FixedSingle, matching the dashboard cards.
+    // A centered, label-less checkbox (the column header names it).
+    private static CheckBox NewCheck() => new() { Text = "", AutoSize = true, Anchor = AnchorStyles.None, Margin = Padding.Empty };
+
+    // A faint row separator at the bottom, so the rows read as a table.
     protected override void OnPaint(PaintEventArgs e)
     {
         base.OnPaint(e);
         using var pen = new Pen(Theme.CardBorder);
-        var rect = ClientRectangle;
-        rect.Width -= 1;
-        rect.Height -= 1;
-        e.Graphics.DrawRectangle(pen, rect);
+        e.Graphics.DrawLine(pen, 0, Height - 1, Width - 1, Height - 1);
     }
 
-    private static Label Caption(string text) => new()
-    {
-        Text = text,
-        AutoSize = true,
-        ForeColor = Theme.Muted,
-        Font = Theme.Font(8.5f),
-        Anchor = AnchorStyles.Left,
-        Margin = new Padding(0, 0, 0, 0),
-    };
-
-    // Reflects field-driven flags onto the optional controls (combos re-select, checkboxes/threshold
-    // resync), then updates which sub-blocks are visible so the AutoSize card reflows.
     private void OnFieldChanged(object? sender, PropertyChangedEventArgs e)
     {
         switch (e.PropertyName)
@@ -210,7 +140,7 @@ internal sealed class FieldRowControl : Panel
                 SyncThreshold();
                 break;
         }
-        SyncVisibility();
+        SyncEnabled();
     }
 
     private void SyncCheckboxes()
@@ -218,7 +148,6 @@ internal sealed class FieldRowControl : Panel
         _syncing = true;
         _useForAggregation.Checked = _field.UseForAggregation;
         _useLoadDate.Checked = _field.UseLoadDateAsDefault;
-        _useLoadDate.Enabled = _field.UseLoadDateAsDefaultEnabled;
         _enableAlert.Checked = _field.EnableAlert;
         _syncing = false;
     }
@@ -226,22 +155,18 @@ internal sealed class FieldRowControl : Panel
     private void SyncThreshold()
     {
         _syncing = true;
-        _threshold.Value = Math.Clamp((int)Math.Round(_field.AlertThreshold * 10), _threshold.Minimum, _threshold.Maximum);
-        _thresholdValue.Text = _field.AlertThreshold.ToString("0.0");
+        _threshold.Value = Math.Clamp((decimal)_field.AlertThreshold, _threshold.Minimum, _threshold.Maximum);
         _syncing = false;
     }
 
-    // Shows the PII / date block under データ型 and the sentiment block per the field's computed flags;
-    // hidden sub-blocks collapse their AutoSize rows so the card shrinks to fit.
-    private void SyncVisibility()
+    // Greys out the cells that do not apply to this field's type / analysis, and shows the 🔒 cell only
+    // for personal-information types — so every row keeps all ten columns while signalling what's active.
+    private void SyncEnabled()
     {
+        _useForAggregation.Enabled = _field.IsDate;
+        _useLoadDate.Enabled = _field.IsDate && _field.UseLoadDateAsDefaultEnabled;
+        _enableAlert.Enabled = _field.IsSentimentSelected;
+        _threshold.Enabled = _field.ShowThreshold;
         _pii.Visible = _field.IsPersonalInformation;
-        _useForAggregation.Visible = _field.IsDate;
-        _useLoadDate.Visible = _field.IsDate;
-        _typeExtras.Visible = _field.IsPersonalInformation || _field.IsDate;
-
-        _enableAlert.Visible = _field.IsSentimentSelected;
-        _thresholdRow.Visible = _field.IsSentimentSelected && _field.ShowThreshold;
-        _sentiment.Visible = _field.IsSentimentSelected;
     }
 }
