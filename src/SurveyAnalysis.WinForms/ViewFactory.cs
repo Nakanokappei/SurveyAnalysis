@@ -12,6 +12,8 @@ internal static class ViewFactory
         WelcomeViewModel vm => new WelcomeControl(vm),
         DashboardViewModel vm => new DashboardControl(vm),
         TimeSliceViewModel vm => new TimeSliceControl(vm),
+        WeekdaySliceViewModel vm => new WeekdaySliceControl(vm),
+        SliceViewModel vm => new SliceControl(vm),
         _ => new PlaceholderControl(page),
     };
 }
