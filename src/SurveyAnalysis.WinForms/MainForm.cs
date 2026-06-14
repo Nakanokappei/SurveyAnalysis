@@ -341,6 +341,10 @@ public sealed class MainForm : Form
     // データ項目の編集（モーダル）。編集モードで開き、保存された下書きを永続化する。
     private void OnEditSchema(Project project)
     {
+        // Loading the schema and building the table takes a noticeable beat; show a busy cursor so the
+        // click is acknowledged until the dialog appears. The construction runs synchronously (no message
+        // pump), so the wait cursor set here stays up until ShowDialog brings the dialog forward.
+        Cursor.Current = Cursors.WaitCursor;
         using var form = new ProjectDesignForm(new ProjectDesignViewModel(project));
         if (form.ShowDialog(this) == DialogResult.OK && form.ResultProject is { } edited)
             _shell.ApplySchemaEdit(edited);

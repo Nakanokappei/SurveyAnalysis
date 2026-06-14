@@ -27,7 +27,17 @@ internal sealed class FieldRowControl : TableLayoutPanel
     // flexible (Percent) column (項目名); the rest are fixed pixel widths sized to their content (the
     // combos and the 削除 button). Used by both the header row (ProjectDesignForm) and every field row so
     // they line up. Pixel widths — this dialog renders unscaled, like the rest of the app.
-    public static readonly int[] ColumnWidths = { 48, 0, 176, 200, 96, 120, 96, 88 };
+    public static readonly int[] ColumnWidths = { OrdinalColumnWidth(), 0, 176, 200, 96, 120, 96, 88 };
+
+    // Width for the # column: enough for 3 half-width digits ("999"). The font renders at the real screen
+    // DPI even though this dialog's layout is otherwise unscaled, so a hardcoded px width clips wider
+    // numbers — the width is measured in that same render context instead. A few px of breathing room
+    // keeps the centered number off the column edges.
+    private static int OrdinalColumnWidth()
+    {
+        using var font = Theme.Font(9.5f);
+        return TextRenderer.MeasureText("999", font).Width + 8;
+    }
 
     public static void DefineColumns(TableLayoutPanel t)
     {
