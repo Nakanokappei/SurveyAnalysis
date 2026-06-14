@@ -19,9 +19,9 @@ internal sealed class DashboardControl : UserControl
 {
     private readonly DashboardViewModel _vm;
 
-    private readonly ComboBox _month = new() { DropDownStyle = ComboBoxStyle.DropDownList, AutoSize = true, Font = Theme.Font(10f), Anchor = AnchorStyles.None };
+    private readonly IconButton _rangeTrigger = new() { Glyph = "📅", IconSize = 9.5f, AutoSize = true, BackColor = Color.White, ForeColor = Theme.TitleText, Font = Theme.Font(10f), Padding = new Padding(10, 6, 10, 6), Cursor = Cursors.Hand, Anchor = AnchorStyles.None };
     private readonly Label _breadcrumb = new() { AutoSize = true, ForeColor = Theme.Muted, Font = Theme.Font(10f), Margin = new Padding(0) };
-    private readonly Button _drillUp = new();
+    private readonly IconButton _drillUp = new() { Glyph = Icons.Back.Glyph, IconFontName = Icons.Back.Font, Text = "集計に戻る" };
     private readonly Label _totalResponses = new() { AutoSize = true, ForeColor = Theme.TitleText, Font = Theme.Font(22f, FontStyle.Bold), Margin = new Padding(0, 0, 0, 2) };
     private readonly Label _negative = new() { AutoSize = true, ForeColor = Theme.Danger, Font = Theme.Font(22f, FontStyle.Bold), Margin = new Padding(0, 0, 0, 2) };
     private readonly Label _avgSentiment = new() { AutoSize = true, ForeColor = Theme.Success, Font = Theme.Font(22f, FontStyle.Bold), Margin = new Padding(0, 0, 0, 2) };
@@ -33,8 +33,6 @@ internal sealed class DashboardControl : UserControl
     private readonly TableLayoutPanel _sentimentBars = NewBarsPanel();
     private readonly Label _emptyHint = new() { AutoSize = true, ForeColor = Theme.Faint, Font = Theme.Font(9.5f), Margin = new Padding(0, 0, 0, 6), Text = "まだ回答がありません。サイドバーの「インポート (CSV)」から取り込めます。" };
     private readonly DataGridView _grid = NewGrid();
-
-    private bool _syncingMonth;
 
     public DashboardControl(DashboardViewModel vm)
     {
@@ -55,7 +53,7 @@ internal sealed class DashboardControl : UserControl
         _vm.TopicBars.CollectionChanged += OnTopicBarsChanged;
         _vm.SentimentBars.CollectionChanged += OnSentimentBarsChanged;
         _vm.Rows.CollectionChanged += OnRowsChanged;
-        _month.SelectedIndexChanged += OnMonthSelected;
+        _rangeTrigger.Click += (_, _) => OpenRangePopup();
     }
 
     protected override void Dispose(bool disposing)
@@ -117,9 +115,11 @@ internal sealed class DashboardControl : UserControl
         titles.Controls.Add(new Label { Text = "ダッシュボード", AutoSize = true, ForeColor = Theme.TitleText, Font = Theme.Font(17f, FontStyle.Bold), Margin = new Padding(0) });
         titles.Controls.Add(_breadcrumb);
 
+        _rangeTrigger.FlatAppearance.BorderColor = Theme.CardBorder;
+        _rangeTrigger.FlatAppearance.BorderSize = 1;
         var picker = new FlowLayoutPanel { FlowDirection = FlowDirection.LeftToRight, WrapContents = false, AutoSize = true, Anchor = AnchorStyles.Right };
-        picker.Controls.Add(new Label { Text = "対象月", AutoSize = true, ForeColor = Theme.BodyText, Font = Theme.Font(10f), Anchor = AnchorStyles.None, Margin = new Padding(0, 0, 8, 0) });
-        picker.Controls.Add(_month);
+        picker.Controls.Add(new Label { Text = "対象期間", AutoSize = true, ForeColor = Theme.BodyText, Font = Theme.Font(10f), Anchor = AnchorStyles.None, Margin = new Padding(0, 0, 8, 0) });
+        picker.Controls.Add(_rangeTrigger);
 
         header.Controls.Add(titles, 0, 0);
         header.Controls.Add(picker, 1, 0);
@@ -128,10 +128,8 @@ internal sealed class DashboardControl : UserControl
 
     private Control BuildDrillUp()
     {
-        _drillUp.Text = "↩ 集計に戻る";
         _drillUp.AutoSize = true;
         _drillUp.Anchor = AnchorStyles.Left;
-        _drillUp.FlatStyle = FlatStyle.Flat;
         _drillUp.BackColor = Theme.CardBorder;
         _drillUp.ForeColor = Theme.TitleText;
         _drillUp.Font = Theme.Font(9.5f);
@@ -267,6 +265,10 @@ internal sealed class DashboardControl : UserControl
         grid.ColumnHeadersDefaultCellStyle.Font = Theme.Font(9.5f, FontStyle.Bold);
         grid.ColumnHeadersDefaultCellStyle.BackColor = Theme.ContentBack;
         grid.ColumnHeadersDefaultCellStyle.ForeColor = Theme.Muted;
+        // No header highlight for the selected column: keep the selected-state header colours the same as
+        // the normal ones (otherwise FullRowSelect tints the current column's header).
+        grid.ColumnHeadersDefaultCellStyle.SelectionBackColor = Theme.ContentBack;
+        grid.ColumnHeadersDefaultCellStyle.SelectionForeColor = Theme.Muted;
         grid.Columns.Add(new DataGridViewTextBoxColumn { HeaderText = "記入日", FillWeight = 22 });
         grid.Columns.Add(new DataGridViewTextBoxColumn { HeaderText = "トピック", FillWeight = 22 });
         grid.Columns.Add(new DataGridViewTextBoxColumn { HeaderText = "感情", FillWeight = 14 });
@@ -283,19 +285,17 @@ internal sealed class DashboardControl : UserControl
     private void OnSentimentBarsChanged(object? sender, NotifyCollectionChangedEventArgs e) => RefreshBars(_sentimentBars, _vm.SentimentBars, drillable: false);
     private void OnRowsChanged(object? sender, NotifyCollectionChangedEventArgs e) => RefreshTable();
 
-    private void OnMonthSelected(object? sender, EventArgs e)
+    // Opens the 対象期間 picker below the trigger; applying a range pushes it into the view model.
+    private void OpenRangePopup()
     {
-        if (!_syncingMonth && _month.SelectedItem is string month)
-            _vm.Month = month;
+        var popup = new DateRangePopup(_vm.Preset, _vm.From, _vm.To);
+        popup.Applied += (preset, from, to) => _vm.SetRange(preset, from, to);
+        popup.ShowBelow(_rangeTrigger);
     }
 
     private void RefreshScalars()
     {
-        _syncingMonth = true;
-        if (_month.DataSource is null)
-            _month.DataSource = _vm.Months;
-        _month.SelectedItem = _vm.Month;
-        _syncingMonth = false;
+        _rangeTrigger.Text = _vm.RangeLabel;
 
         _breadcrumb.Text = _vm.Breadcrumb;
         _totalResponses.Text = _vm.TotalResponses.ToString();

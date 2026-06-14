@@ -19,7 +19,7 @@ internal sealed class TimeSliceControl : UserControl
     private readonly Label _scopeSummary = new() { AutoSize = true, ForeColor = Theme.Muted, Font = Theme.Font(10f), Margin = new Padding(0) };
     private readonly Label _levelTitle = new() { AutoSize = true, ForeColor = Theme.TitleText, Font = Theme.Font(12f, FontStyle.Bold), Margin = new Padding(0, 0, 0, 8) };
     private readonly Label _empty = new() { AutoSize = true, ForeColor = Theme.Faint, Font = Theme.Font(9.5f), Margin = new Padding(0, 0, 0, 6) };
-    private readonly Button _drillUp = new();
+    private readonly IconButton _drillUp = new() { Glyph = Icons.Back.Glyph, IconFontName = Icons.Back.Font, Text = "戻る" };
     private readonly FlowLayoutPanel _navBar = new() { FlowDirection = FlowDirection.LeftToRight, WrapContents = false, AutoSize = true, AutoSizeMode = AutoSizeMode.GrowAndShrink, BackColor = Theme.ContentBack, Anchor = AnchorStyles.Left, Margin = new Padding(0) };
     private readonly DataGridView _analysisGrid;
     private readonly DataGridView _responsesGrid = SliceTableView.BuildResponsesGrid();
@@ -103,10 +103,8 @@ internal sealed class TimeSliceControl : UserControl
     private void WireInteractions()
     {
         // 戻る pops one drill level. Visibility tracks CanDrillUp; the layout itself never moves.
-        _drillUp.Text = "↩ 戻る";
         _drillUp.AutoSize = true;
         _drillUp.Anchor = AnchorStyles.Left;
-        _drillUp.FlatStyle = FlatStyle.Flat;
         _drillUp.BackColor = Theme.CardBorder;
         _drillUp.ForeColor = Theme.TitleText;
         _drillUp.Font = Theme.Font(9.5f);

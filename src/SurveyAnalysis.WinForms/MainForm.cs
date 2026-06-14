@@ -182,14 +182,12 @@ public sealed class MainForm : Form
         bottom.Padding = new Padding(0, LogicalToDeviceUnits(8), 0, LogicalToDeviceUnits(14));
         if (_shell.IsProjectOpen)
         {
-            AddRow(bottom, NavButton("＋ インポート (CSV)", () => _shell.ImportCommand.Execute(null)));
-            AddRow(bottom, NavButton("⬆ エクスポート", OnExportNotImplemented));
+            AddRow(bottom, NavButton(Icons.Add, "インポート (CSV)", () => _shell.ImportCommand.Execute(null)));
+            AddRow(bottom, NavButton(Icons.Export, "エクスポート", OnExportNotImplemented));
             AddRow(bottom, Divider());
-            AddRow(bottom, NavButton("✎ データ項目", () => _shell.EditSchemaCommand.Execute(null)));
-            AddRow(bottom, Divider());
-            AddRow(bottom, NavButton("✕ プロジェクトを閉じる", () => _shell.CloseProjectCommand.Execute(null)));
+            AddRow(bottom, NavButton(Icons.Close, "プロジェクトを閉じる", () => _shell.CloseProjectCommand.Execute(null)));
         }
-        AddRow(bottom, NavButton("⚙ 設定", OnSettings));
+        AddRow(bottom, NavButton(Icons.Settings, "設定", OnSettings));
 
         // Main navigation fills the space above the bottom actions.
         var nav = NavStack();
@@ -197,38 +195,57 @@ public sealed class MainForm : Form
         nav.AutoScroll = true;
         nav.Padding = new Padding(0, LogicalToDeviceUnits(14), 0, 0);
 
-        AddRow(nav, new Label
+        var heading = new Label
         {
             Text = "プロジェクト",
             ForeColor = Color.White,
             Font = Theme.Font(10f, FontStyle.Bold),
             AutoSize = true,
             Anchor = AnchorStyles.Left,
-            Margin = new Padding(LogicalToDeviceUnits(NavTextIndentDip), 4, 16, 2),
-        });
+            Margin = new Padding(LogicalToDeviceUnits(NavTextIndentDip), 4, 8, 2),
+        };
         if (_shell.IsProjectOpen && _shell.CurrentProject is { } project)
-            AddRow(nav, new Label
+        {
+            // Heading + project name on the left, the 2-line-tall 構成 (project configuration) button on
+            // the right — it opens the same schema dialog the old bottom データ項目 entry did.
+            var nameLabel = new Label
             {
                 Text = project.Name,
                 ForeColor = Theme.ProjectName,
                 Font = Theme.Font(9f),
                 AutoSize = true,
                 Anchor = AnchorStyles.Left,
-                Margin = new Padding(LogicalToDeviceUnits(NavTextIndentDip), 0, 16, 8),
-            });
+                Margin = new Padding(LogicalToDeviceUnits(NavTextIndentDip), 0, 8, 8),
+            };
+            var textStack = new FlowLayoutPanel { FlowDirection = FlowDirection.TopDown, WrapContents = false, AutoSize = true, AutoSizeMode = AutoSizeMode.GrowAndShrink, Anchor = AnchorStyles.Left, BackColor = Theme.SidebarBack, Margin = Padding.Empty };
+            textStack.Controls.Add(heading);
+            textStack.Controls.Add(nameLabel);
+
+            var block = new TableLayoutPanel { ColumnCount = 2, RowCount = 1, AutoSize = true, AutoSizeMode = AutoSizeMode.GrowAndShrink, Anchor = AnchorStyles.Left | AnchorStyles.Right, BackColor = Theme.SidebarBack, Margin = Padding.Empty };
+            block.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
+            block.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
+            block.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+            block.Controls.Add(textStack, 0, 0);
+            block.Controls.Add(ConfigureButton(), 1, 0);
+            AddRow(nav, block);
+        }
+        else
+        {
+            AddRow(nav, heading);
+        }
 
         if (_shell.IsProjectOpen)
         {
-            AddRow(nav, NavButton("▤ ダッシュボード", () => _shell.OpenDashboardCommand.Execute(null)));
+            AddRow(nav, NavButton(Icons.Dashboard, "ダッシュボード", () => _shell.OpenDashboardCommand.Execute(null)));
             AddRow(nav, SectionLabel("切り口"));
-            AddRow(nav, NavButton(_shell.IsTimeExpanded ? "▾ 時間別" : "▸ 時間別", () => _shell.ToggleTimeCommand.Execute(null)));
+            AddRow(nav, NavButton(_shell.IsTimeExpanded ? Icons.Expand : Icons.Collapse, "時間別", () => _shell.ToggleTimeCommand.Execute(null)));
             if (_shell.IsTimeExpanded)
             {
                 AddRow(nav, SubNavButton("期間", () => _shell.OpenPeriodCommand.Execute(null)));
                 AddRow(nav, SubNavButton("曜日", () => _shell.OpenWeekdayCommand.Execute(null)));
             }
-            AddRow(nav, NavButton("▸ 地域別", () => _shell.OpenSliceCommand.Execute(SliceKind.Region)));
-            AddRow(nav, NavButton("▸ トピック別", () => _shell.OpenSliceCommand.Execute(SliceKind.Topic)));
+            AddRow(nav, NavButton(Icons.Bullet, "地域別", () => _shell.OpenSliceCommand.Execute(SliceKind.Region)));
+            AddRow(nav, NavButton(Icons.Bullet, "トピック別", () => _shell.OpenSliceCommand.Execute(SliceKind.Topic)));
         }
 
         // Trailing filler row absorbs the leftover height so the nav buttons stay tight at the top
@@ -264,18 +281,20 @@ public sealed class MainForm : Form
         stack.RowCount++;
     }
 
-    // A flat, left-aligned sidebar button that highlights on hover, wired to a command. AutoSize sets
-    // its height from the font (DPI-correct, never clips); Anchor=Left|Right stretches it to the column.
-    private Button NavButton(string text, Action onClick)
+    // A flat, left-aligned sidebar button that highlights on hover, wired to a command. The leading icon
+    // glyph is drawn in Segoe UI Emoji (via IconButton) so it never breaks; pass "" for no icon.
+    // Anchor=Left|Right stretches it to the column; the height is fixed so the 8 DIP gaps stay tight.
+    private IconButton NavButton((string Font, string Glyph) icon, string text, Action onClick)
     {
-        var button = new Button
+        var button = new IconButton
         {
+            Glyph = icon.Glyph,
+            IconFontName = icon.Font,
             Text = text,
             // Fixed compact height (AutoSize made the buttons ~27 DIP tall — far more than the text —
             // which dwarfed the gaps; a fixed height keeps the rows tight and the 8 DIP gap visible).
             AutoSize = false,
             Anchor = AnchorStyles.Left | AnchorStyles.Right,
-            FlatStyle = FlatStyle.Flat,
             BackColor = Theme.SidebarBack,
             ForeColor = Theme.NavText,
             TextAlign = ContentAlignment.MiddleLeft,
@@ -295,10 +314,10 @@ public sealed class MainForm : Form
         return button;
     }
 
-    // An indented, smaller sidebar button for the 時間別 → 期間 / 曜日 sub-items.
-    private Button SubNavButton(string text, Action onClick)
+    // An indented, smaller sidebar button (no icon) for the 時間別 → 期間 / 曜日 sub-items.
+    private IconButton SubNavButton(string text, Action onClick)
     {
-        var button = NavButton(text, onClick);
+        var button = NavButton(Icons.None, text, onClick);
         button.ForeColor = Theme.SubNavText;
         button.Font = Theme.Font(9f);
         // Sub-items hug their parent (時間別) and each other — a 2 DIP gap vs the 8 DIP between top-level
@@ -306,6 +325,35 @@ public sealed class MainForm : Form
         button.Margin = new Padding(LogicalToDeviceUnits(8), LogicalToDeviceUnits(2), LogicalToDeviceUnits(8), 0);
         button.Padding = new Padding(LogicalToDeviceUnits(28), 0, LogicalToDeviceUnits(6), 0);
         button.Height = LogicalToDeviceUnits(18);
+        return button;
+    }
+
+    // The 構成 (project configuration) button in the sidebar header — a bordered, 2-line-tall pill that
+    // opens the schema dialog (formerly the bottom データ項目 entry). The vertical padding makes it about
+    // as tall as the heading + project-name block beside it; it is centred vertically in that block.
+    private IconButton ConfigureButton()
+    {
+        var button = new IconButton
+        {
+            Glyph = Icons.Edit.Glyph,
+            IconFontName = Icons.Edit.Font,
+            Text = "構成",
+            IconSize = 9.5f,
+            AutoSize = true,
+            AutoSizeMode = AutoSizeMode.GrowAndShrink,
+            Anchor = AnchorStyles.None,
+            BackColor = Theme.SidebarBack,
+            ForeColor = Theme.NavText,
+            Font = Theme.Font(9.5f),
+            Padding = new Padding(LogicalToDeviceUnits(12), LogicalToDeviceUnits(10), LogicalToDeviceUnits(12), LogicalToDeviceUnits(10)),
+            Margin = new Padding(0, 0, LogicalToDeviceUnits(8), 0),
+            Cursor = Cursors.Hand,
+            TabStop = false,
+        };
+        button.FlatAppearance.BorderSize = 1;
+        button.FlatAppearance.BorderColor = Theme.SidebarHover;
+        button.FlatAppearance.MouseOverBackColor = Theme.SidebarHover;
+        button.Click += (_, _) => _shell.EditSchemaCommand.Execute(null);
         return button;
     }
 
@@ -362,6 +410,9 @@ public sealed class MainForm : Form
         if (picker.ShowDialog(this) != DialogResult.OK)
             return;
 
+        // Reading + parsing the CSV and building the design dialog takes a noticeable beat; show a busy
+        // cursor so the file pick is acknowledged until the dialog appears (same as OnEditSchema).
+        Cursor.Current = Cursors.WaitCursor;
         var vm = new ProjectDesignViewModel(File.ReadAllBytes(picker.FileName), Path.GetFileName(picker.FileName));
         if (vm.SourceCsv is null || vm.SourceCsv.Header.Count == 0)
         {

@@ -19,7 +19,7 @@ internal sealed class FieldRowControl : TableLayoutPanel
     private readonly EnumCombo<AnalysisMethod> _analysis;
     private readonly CheckBox _useForAggregation = NewCheck();
     private readonly CheckBox _useLoadDate = NewCheck();
-    private readonly Label _pii = new() { Text = "🔒", AutoSize = true, ForeColor = ColorTranslator.FromHtml("#92400E"), Font = Theme.Font(11f), Anchor = AnchorStyles.None, Margin = Padding.Empty };
+    private readonly Label _pii = new() { Text = "🔒", AutoSize = true, ForeColor = ColorTranslator.FromHtml("#92400E"), Font = Theme.IconFont(11f), Anchor = AnchorStyles.None, Margin = Padding.Empty };
 
     private bool _syncing;
 

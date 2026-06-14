@@ -38,4 +38,18 @@ internal static class Theme
     public const string FontName = "Yu Gothic UI";
 
     public static Font Font(float size = 9f, FontStyle style = FontStyle.Regular) => new(FontName, size, style);
+
+    // Icon fonts. Directional glyphs (arrows / triangles) use the Webdings family — Wingdings 3 has clean
+    // box-free triangles and arrows, Webdings has the media controls — because Segoe UI Emoji draws those
+    // with an enclosing rounded box. Pictographs with no Webdings equivalent (gear, calendar, lock, bar
+    // chart, plus) stay on Segoe UI Emoji, which is the OS-standard emoji font (no missing-glyph tofu) and
+    // draws them box-free. All render monochrome under GDI, tinted by the control's ForeColor. See Icons.
+    public const string IconFontName = "Segoe UI Emoji";
+    public const string Webdings = "Webdings";
+    public const string Wingdings = "Wingdings";
+    public const string Wingdings3 = "Wingdings 3";
+
+    public static Font IconFont(float size = 9f, FontStyle style = FontStyle.Regular) => new(IconFontName, size, style);
+
+    public static Font IconFont(string fontName, float size, FontStyle style = FontStyle.Regular) => new(fontName, size, style);
 }

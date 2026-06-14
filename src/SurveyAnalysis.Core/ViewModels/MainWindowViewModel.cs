@@ -68,7 +68,7 @@ public partial class MainWindowViewModel : ViewModelBase
         if (_projects.Load(id) is not { } project)
             return;
         CurrentProject = project;
-        CurrentPage = new DashboardViewModel(project, _responses, project.Months.Count > 0 ? project.Months[0] : "（今月）");
+        CurrentPage = new DashboardViewModel(project, _responses);
     }
 
     // 新規にプロジェクトを作る → the view shows the modal design dialog.
@@ -85,7 +85,7 @@ public partial class MainWindowViewModel : ViewModelBase
     private void OpenSampleProject()
     {
         CurrentProject = SampleData.CreateSampleProject();
-        CurrentPage = new DashboardViewModel(CurrentProject, _responses, CurrentProject.Months[0]);
+        CurrentPage = new DashboardViewModel(CurrentProject, _responses);
     }
 
     // Called by the design screen when the user confirms the new project: persist it, then open
@@ -96,7 +96,7 @@ public partial class MainWindowViewModel : ViewModelBase
             project.Months.Add("（今月）");
         _projects.Insert(project);
         CurrentProject = project;
-        CurrentPage = new DashboardViewModel(project, _responses, project.Months[0]);
+        CurrentPage = new DashboardViewModel(project, _responses);
     }
 
     // Called by the host after the user reviews a CSV-seeded schema and confirms: persist the project,
@@ -114,7 +114,7 @@ public partial class MainWindowViewModel : ViewModelBase
         _analytics.Rebuild(project);
 
         CurrentProject = project;
-        CurrentPage = new DashboardViewModel(project, _responses, project.Months[0]);
+        CurrentPage = new DashboardViewModel(project, _responses);
     }
 
     // データ項目（開いているプロジェクトのスキーマを確認・変更するモーダル）
@@ -133,7 +133,7 @@ public partial class MainWindowViewModel : ViewModelBase
         if (_projects.Load(draft.Id) is not { } reloaded)
             return;
         CurrentProject = reloaded;
-        CurrentPage = new DashboardViewModel(reloaded, _responses, reloaded.Months.Count > 0 ? reloaded.Months[0] : "（今月）");
+        CurrentPage = new DashboardViewModel(reloaded, _responses);
     }
 
     // ダッシュボード（選択月の集計）
@@ -141,7 +141,7 @@ public partial class MainWindowViewModel : ViewModelBase
     private void OpenDashboard()
     {
         if (CurrentProject is { } project)
-            CurrentPage = new DashboardViewModel(project, _responses, project.Months[0]);
+            CurrentPage = new DashboardViewModel(project, _responses);
     }
 
     // 切り口（時間別 / 地域別 / トピック別）をスタースキーマから集計して表示。

@@ -1,3 +1,4 @@
+using System;
 using SurveyAnalysis.Data;
 using SurveyAnalysis.Models;
 using SurveyAnalysis.ViewModels;
@@ -16,7 +17,7 @@ public class DashboardViewModelTests
     }
 
     [Fact]
-    public void Real_project_aggregates_imported_responses_for_the_selected_month()
+    public void Real_project_aggregates_imported_responses_for_the_selected_range()
     {
         using var temp = new TempDatabase();
         var projects = new ProjectRepository(temp.Db);
@@ -36,7 +37,9 @@ public class DashboardViewModelTests
             Response(("記入日", "2026/04/10"), ("氏名", "別月さん"), ("ご意見", "先月分。")),
         });
 
-        var vm = new DashboardViewModel(projects.Load(pid)!, responses, "2026年5月");
+        var vm = new DashboardViewModel(projects.Load(pid)!, responses);
+        // Pick an explicit May range so the test does not depend on today's date.
+        vm.SetRange(DateRangePreset.Custom, new DateTime(2026, 5, 1), new DateTime(2026, 5, 31));
 
         // Only the two May responses are counted; April is filtered out.
         Assert.Equal(2, vm.TotalResponses);
@@ -68,7 +71,8 @@ public class DashboardViewModelTests
         project.Months.Add("2026年5月");
         var pid = projects.Insert(project);
 
-        var vm = new DashboardViewModel(projects.Load(pid)!, responses, "2026年5月");
+        var vm = new DashboardViewModel(projects.Load(pid)!, responses);
+        vm.SetRange(DateRangePreset.Custom, new DateTime(2026, 5, 1), new DateTime(2026, 5, 31));
 
         Assert.Equal(0, vm.TotalResponses);
         Assert.True(vm.HasNoResponses);

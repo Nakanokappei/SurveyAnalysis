@@ -70,7 +70,7 @@ internal sealed class WelcomeControl : UserControl
         if (_vm.HasRecentProjects)
             card.Controls.Add(RecentProjectsList());
 
-        card.Controls.Add(PrimaryButton("＋ プロジェクトを作る", () => _vm.CreateProjectCommand.Execute(null)));
+        card.Controls.Add(PrimaryButton("➕", "プロジェクトを作る", () => _vm.CreateProjectCommand.Execute(null)));
         card.Controls.Add(OutlineButton("CSV からプロジェクトを作る", () => _vm.CreateFromCsvCommand.Execute(null)));
         card.Controls.Add(LinkButton("サンプルプロジェクトを開く", () => _vm.OpenSampleCommand.Execute(null)));
 
@@ -188,15 +188,15 @@ internal sealed class WelcomeControl : UserControl
     // the wider card. AutoSize + Padding set its height; MinimumSize pins its width. An 8 DIP top margin
     // gives a uniform 8 DIP gap between the stacked buttons (the control above carries no bottom margin).
     // Instance method so the width/gap can be converted for the DPI.
-    private Button BaseButton(string text, Action onClick) =>
-        WithClick(new Button
+    private Button BaseButton(string glyph, string text, Action onClick) =>
+        WithClick(new IconButton
         {
+            Glyph = glyph,
             Text = text,
             AutoSize = true,
             AutoSizeMode = AutoSizeMode.GrowAndShrink,
             Anchor = AnchorStyles.None,
             MinimumSize = new Size(ContentWidth, 0),
-            FlatStyle = FlatStyle.Flat,
             Font = Theme.Font(10.5f),
             TextAlign = ContentAlignment.MiddleCenter,
             Padding = new Padding(12, 9, 12, 9),
@@ -205,9 +205,9 @@ internal sealed class WelcomeControl : UserControl
             TabStop = false,
         }, onClick);
 
-    private Button PrimaryButton(string text, Action onClick)
+    private Button PrimaryButton(string glyph, string text, Action onClick)
     {
-        var button = BaseButton(text, onClick);
+        var button = BaseButton(glyph, text, onClick);
         button.BackColor = Theme.Accent;
         button.ForeColor = Theme.AccentText;
         button.FlatAppearance.BorderSize = 0;
@@ -216,7 +216,7 @@ internal sealed class WelcomeControl : UserControl
 
     private Button OutlineButton(string text, Action onClick)
     {
-        var button = BaseButton(text, onClick);
+        var button = BaseButton("", text, onClick);
         button.BackColor = Color.White;
         button.ForeColor = Theme.Accent;
         button.FlatAppearance.BorderColor = Theme.Accent;
@@ -226,7 +226,7 @@ internal sealed class WelcomeControl : UserControl
 
     private Button LinkButton(string text, Action onClick)
     {
-        var button = BaseButton(text, onClick);
+        var button = BaseButton("", text, onClick);
         button.BackColor = Theme.ContentBack;
         button.ForeColor = Theme.Accent;
         button.FlatAppearance.BorderSize = 0;

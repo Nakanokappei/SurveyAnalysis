@@ -46,7 +46,7 @@ public partial class ProjectDesignViewModel : ViewModelBase
     // the dialog title and the confirm button label, and tells CreateProject to update in place.
     private readonly Project? _editingProject;
     public bool IsEditing => _editingProject is not null;
-    public string DialogTitle => IsEditing ? "データ項目の編集" : "プロジェクト作成";
+    public string DialogTitle => IsEditing ? "プロジェクトの構成" : "プロジェクト作成";
     public string ConfirmLabel => IsEditing ? "変更を保存" : "このデータ形式で作成";
 
     // Create mode: seed a few starter rows so the layout is populated.

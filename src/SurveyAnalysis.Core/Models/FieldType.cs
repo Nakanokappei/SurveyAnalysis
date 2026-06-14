@@ -19,7 +19,7 @@ public enum FieldType
     Choice,     // 選択肢
     Number,     // 数値
     Text,       // テキスト（短文）
-    FreeText    // 文章（自由記述）
+    FreeText    // テキスト（改行あり）＝自由記述
 }
 
 // Japanese labels and the PII flag for FieldType / AnalysisMethod. Kept next to the enums
@@ -38,7 +38,7 @@ public static class FieldTypeInfo
         FieldType.Choice => "選択肢",
         FieldType.Number => "数値",
         FieldType.Text => "テキスト",
-        FieldType.FreeText => "文章",
+        FieldType.FreeText => "テキスト（改行あり）",
         _ => type.ToString()
     };
 

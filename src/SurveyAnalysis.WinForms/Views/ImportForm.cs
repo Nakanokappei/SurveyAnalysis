@@ -25,15 +25,15 @@ internal sealed class ImportForm : Form
 
     private readonly Label _selectedFile = new() { AutoSize = true, ForeColor = Theme.TitleText, Font = Theme.Font(10f), Anchor = AnchorStyles.Left, Margin = new Padding(0, 2, 0, 0) };
     private readonly Label _status = new() { AutoSize = true, ForeColor = ColorTranslator.FromHtml("#B45309"), Font = Theme.Font(9.5f), Anchor = AnchorStyles.Left, Margin = new Padding(0, 0, 0, 8) };
-    private readonly Label _position = new() { AutoSize = true, TextAlign = ContentAlignment.MiddleCenter, ForeColor = Theme.TitleText, Font = Theme.Font(9.5f, FontStyle.Bold), Anchor = AnchorStyles.None, Margin = new Padding(8, 0, 8, 0) };
+    private readonly Label _position = new() { AutoSize = true, TextAlign = ContentAlignment.MiddleCenter, ForeColor = Theme.TitleText, Font = Theme.Font(9.5f, FontStyle.Bold), Anchor = AnchorStyles.None, Margin = new Padding(4, 0, 4, 0) };
     private readonly Panel _columns = new() { Dock = DockStyle.Fill, AutoScroll = true, BackColor = Color.White };
     private readonly TableLayoutPanel _columnRows = NewStack();
     private readonly Button _select = new() { Text = "ファイルを選択", AutoSize = true, FlatStyle = FlatStyle.Flat, BackColor = Theme.CardBorder, ForeColor = Theme.TitleText, Font = Theme.Font(9.5f), Padding = new Padding(12, 7, 12, 7), Cursor = Cursors.Hand, Anchor = AnchorStyles.None };
     private readonly Button _merge = new() { Text = "マージ", AutoSize = true, FlatStyle = FlatStyle.Flat, BackColor = Theme.Accent, ForeColor = Color.White, Font = Theme.Font(10f, FontStyle.Bold), Padding = new Padding(18, 8, 18, 8), Cursor = Cursors.Hand, Anchor = AnchorStyles.None, Margin = new Padding(10, 0, 0, 0) };
-    private readonly Button _first = NavButton("◀◀ 先頭");
-    private readonly Button _previous = NavButton("◀ 戻る");
-    private readonly Button _next = NavButton("次へ ▶");
-    private readonly Button _last = NavButton("最後 ▶▶");
+    private readonly Button _first = NavButton(Icons.First, "先頭");
+    private readonly Button _previous = NavButton(Icons.Prev, "戻る");
+    private readonly Button _next = NavButton(Icons.Next, "次へ", trailing: true);
+    private readonly Button _last = NavButton(Icons.Last, "最後", trailing: true);
 
     public ImportForm(ImportViewModel vm)
     {
@@ -72,7 +72,7 @@ internal sealed class ImportForm : Form
 
     private void BuildLayout()
     {
-        var intro = new Label { Text = "デジタルに回収したアンケートのCSVを取り込み、既存データにマージします。", AutoSize = true, ForeColor = Theme.Muted, Font = Theme.Font(9.5f), Anchor = AnchorStyles.Left, Margin = new Padding(0, 0, 0, 14) };
+        var intro = new Label { Text = "データ化したアンケートの回答をCSV形式で読み込み、プロジェクトにマージできます。", AutoSize = true, ForeColor = Theme.Muted, Font = Theme.Font(9.5f), Anchor = AnchorStyles.Left, Margin = new Padding(0, 0, 0, 14) };
 
         // File card: file name on the left, ファイルを選択 / マージ buttons on the right.
         var fileCard = SoftCard();
@@ -108,16 +108,17 @@ internal sealed class ImportForm : Form
         _columnRows.BackColor = Color.White;
         _columns.Controls.Add(_columnRows);
 
-        // Header row: title on the left (AutoSize column so the bold title never wraps), navigation
-        // right-aligned in the remaining Percent column.
-        var headRow = new TableLayoutPanel { Dock = DockStyle.Top, ColumnCount = 2, RowCount = 1, AutoSize = true, AutoSizeMode = AutoSizeMode.GrowAndShrink, BackColor = Color.White };
-        headRow.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
+        // Header: the title on its own row, then the record pager on a full-width row below it, right-
+        // aligned. (Sharing one row with the title squeezed the pager so the last button overflowed the
+        // dialog edge; its own full-width row fits all five controls down to the minimum dialog width.)
+        var headRow = new TableLayoutPanel { Dock = DockStyle.Top, ColumnCount = 1, RowCount = 2, AutoSize = true, AutoSizeMode = AutoSizeMode.GrowAndShrink, BackColor = Color.White };
         headRow.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
         headRow.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+        headRow.RowStyles.Add(new RowStyle(SizeType.AutoSize));
         headRow.Controls.Add(new Label { Text = "プレビュー", AutoSize = true, ForeColor = Theme.TitleText, Font = Theme.Font(12f, FontStyle.Bold), Anchor = AnchorStyles.Left }, 0, 0);
-        var nav = new FlowLayoutPanel { FlowDirection = FlowDirection.LeftToRight, WrapContents = false, AutoSize = true, AutoSizeMode = AutoSizeMode.GrowAndShrink, Anchor = AnchorStyles.Right };
+        var nav = new FlowLayoutPanel { FlowDirection = FlowDirection.LeftToRight, WrapContents = false, AutoSize = true, AutoSizeMode = AutoSizeMode.GrowAndShrink, Anchor = AnchorStyles.Right, Margin = new Padding(0, 4, 0, 0) };
         nav.Controls.AddRange(new Control[] { _first, _previous, _position, _next, _last });
-        headRow.Controls.Add(nav, 1, 0);
+        headRow.Controls.Add(nav, 0, 1);
 
         // Column header sharing the rows' three-column proportions, then a divider.
         var colHeader = new TableLayoutPanel { Dock = DockStyle.Top, ColumnCount = 3, RowCount = 1, AutoSize = true, AutoSizeMode = AutoSizeMode.GrowAndShrink, BackColor = Color.White, Margin = new Padding(0, 6, 0, 0) };
@@ -228,16 +229,20 @@ internal sealed class ImportForm : Form
         button.Enabled = command.CanExecute(null);
     }
 
-    private static Button NavButton(string text) => new()
+    private static Button NavButton((string Font, string Glyph) icon, string text, bool trailing = false) => new IconButton
     {
+        Glyph = icon.Glyph,
+        IconFontName = icon.Font,
         Text = text,
+        GlyphTrailing = trailing,
+        IconSize = 8f,
+        IconGap = 3,
         AutoSize = true,
-        FlatStyle = FlatStyle.Flat,
         BackColor = Theme.CardBorder,
         ForeColor = Theme.TitleText,
         Font = Theme.Font(9f),
-        Padding = new Padding(8, 5, 8, 5),
-        Margin = new Padding(3, 0, 3, 0),
+        Padding = new Padding(5, 4, 5, 4),
+        Margin = new Padding(2, 0, 2, 0),
         Cursor = Cursors.Hand,
         Anchor = AnchorStyles.None,
     };

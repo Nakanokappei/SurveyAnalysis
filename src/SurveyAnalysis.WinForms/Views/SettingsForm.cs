@@ -39,7 +39,7 @@ internal sealed class SettingsForm : Form
         _header.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
         _header.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
         _header.RowStyles.Add(new RowStyle(SizeType.AutoSize));
-        var reset = new Button { Text = "↺ デフォルトに戻す", AutoSize = true, FlatStyle = FlatStyle.Flat, BackColor = Theme.ContentBack, ForeColor = Theme.Muted, Font = Theme.Font(9f), Cursor = Cursors.Hand, Anchor = AnchorStyles.Right, Padding = new Padding(10, 5, 10, 5) };
+        var reset = new IconButton { Glyph = Icons.Reset.Glyph, IconFontName = Icons.Reset.Font, Text = "デフォルトに戻す", AutoSize = true, BackColor = Theme.ContentBack, ForeColor = Theme.Muted, Font = Theme.Font(9f), Cursor = Cursors.Hand, Anchor = AnchorStyles.Right, Padding = new Padding(10, 5, 10, 5) };
         reset.FlatAppearance.BorderColor = Theme.CardBorder;
         reset.FlatAppearance.BorderSize = 1;
         reset.Click += (_, _) => _vm.ResetToDefaultsCommand.Execute(null);

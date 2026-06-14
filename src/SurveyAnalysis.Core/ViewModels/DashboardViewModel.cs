@@ -26,13 +26,21 @@ public partial class DashboardViewModel : ViewModelBase
     private readonly string? _excerptFieldName;
     private string? _drilledTopic;
 
-    // Months available for selection in the dashboard header.
-    public ObservableCollection<string> Months { get; }
+    // The active 対象期間 (date range): a preset window or a custom [from, to] picked on the calendar.
+    private DateRangePreset _preset = DateRangePreset.Last30Days;
+    private DateTime _from;
+    private DateTime _to;
 
-    [ObservableProperty]
-    private string _month;
+    public DateRangePreset Preset => _preset;
+    public DateTime From => _from;
+    public DateTime To => _to;
 
-    // Breadcrumb shown above the charts, e.g. "2026年5月" or "2026年5月 ＞ 配線・接続".
+    // The picker button's text: the preset's name, or the custom range as dates.
+    public string RangeLabel => _preset == DateRangePreset.Custom
+        ? $"{_from:yyyy/MM/dd} 〜 {_to:yyyy/MM/dd}"
+        : DateRangePresetInfo.Label(_preset);
+
+    // Breadcrumb shown above the charts, e.g. "直近30日" or "直近30日 ＞ 配線・接続".
     [ObservableProperty]
     private string _breadcrumb = "";
 
@@ -71,14 +79,17 @@ public partial class DashboardViewModel : ViewModelBase
     public ObservableCollection<BarItem> SentimentBars { get; } = new();
     public ObservableCollection<SurveyRow> Rows { get; } = new();
 
-    public DashboardViewModel(Project project, ResponseRepository responses, string month)
+    public DashboardViewModel(Project project, ResponseRepository responses)
     {
         _project = project;
-        Months = project.Months;
-        _month = month;
 
-        // The aggregation date field gives each response its month and its 記入日; the excerpt comes
-        // from a free-text (or sentiment) field — never from personal-information fields.
+        // Default 対象期間 = 直近30日 (ending today).
+        var (from, to) = DateRangePresetInfo.Range(DateRangePreset.Last30Days, DateTime.Today)!.Value;
+        _from = from;
+        _to = to;
+
+        // The aggregation date field gives each response its 記入日 and decides whether it falls in the
+        // selected range; the excerpt comes from a free-text (or sentiment) field — never from PII.
         _aggregationFieldName = project.Fields.FirstOrDefault(f => f.UseForAggregation)?.Name;
         _excerptFieldName =
             project.Fields.FirstOrDefault(f => f.FieldType == FieldType.FreeText)?.Name
@@ -92,15 +103,23 @@ public partial class DashboardViewModel : ViewModelBase
         ShowOverview();
     }
 
-    // Re-selecting a month from the header resets to the overview level.
-    partial void OnMonthChanged(string value) => ShowOverview();
+    // Applies a new 対象期間 chosen in the picker, then rebuilds the overview. Custom carries the user's
+    // [from, to]; a preset's range is recomputed by the caller (the picker) so it stays anchored at today.
+    public void SetRange(DateRangePreset preset, DateTime from, DateTime to)
+    {
+        _preset = preset;
+        _from = from.Date;
+        _to = to.Date;
+        OnPropertyChanged(nameof(RangeLabel));
+        ShowOverview();
+    }
 
-    // Builds the month overview, dispatching to the sample (dummy) or real aggregation.
+    // Builds the period overview, dispatching to the sample (dummy) or real aggregation.
     private void ShowOverview()
     {
         _drilledTopic = null;
         CanDrillUp = false;
-        Breadcrumb = Month;
+        Breadcrumb = RangeLabel;
         LevelTitle = "トピック別 件数";
 
         if (_isSample)
@@ -119,18 +138,18 @@ public partial class DashboardViewModel : ViewModelBase
         TopicBars.Clear();
         SentimentBars.Clear();
 
-        var monthResponses = FilterByMonth(_loaded);
-        TotalResponses = monthResponses.Count;
-        HasNoResponses = monthResponses.Count == 0;
+        var inRange = FilterByRange(_loaded);
+        TotalResponses = inRange.Count;
+        HasNoResponses = inRange.Count == 0;
 
         Rows.Clear();
-        foreach (var response in monthResponses)
+        foreach (var response in inRange)
             Rows.Add(BuildRow(response));
     }
 
-    // Keeps only responses whose aggregation-date answer falls in the selected month. With no
-    // aggregation field, the month cannot be determined, so all responses are shown.
-    private IReadOnlyList<IReadOnlyDictionary<string, string>> FilterByMonth(
+    // Keeps only responses whose aggregation-date answer falls in the selected [from, to] range
+    // (inclusive). With no aggregation field the date cannot be determined, so all responses are shown.
+    private IReadOnlyList<IReadOnlyDictionary<string, string>> FilterByRange(
         IReadOnlyList<IReadOnlyDictionary<string, string>> responses)
     {
         if (_aggregationFieldName is null)
@@ -140,7 +159,7 @@ public partial class DashboardViewModel : ViewModelBase
         foreach (var response in responses)
         {
             response.TryGetValue(_aggregationFieldName, out var dateValue);
-            if (MonthLabel(dateValue) == Month)
+            if (TryParseDate(dateValue, out var date) && date.Date >= _from && date.Date <= _to)
                 result.Add(response);
         }
         return result;
@@ -185,7 +204,7 @@ public partial class DashboardViewModel : ViewModelBase
     {
         _drilledTopic = topic;
         CanDrillUp = true;
-        Breadcrumb = $"{Month}  ＞  {topic}";
+        Breadcrumb = $"{RangeLabel}  ＞  {topic}";
         LevelTitle = $"{topic} ・ 週別件数";
 
         var weekly = new (string Label, int Count)[]
@@ -260,8 +279,6 @@ public partial class DashboardViewModel : ViewModelBase
         return DateTime.TryParse(value, CultureInfo.InvariantCulture, DateTimeStyles.None, out date)
             || DateTime.TryParseExact(value.Trim(), DateFormats, CultureInfo.InvariantCulture, DateTimeStyles.None, out date);
     }
-
-    private static string? MonthLabel(string? value) => TryParseDate(value, out var d) ? $"{d.Year}年{d.Month}月" : null;
 
     private static string FormatDate(string? value) => TryParseDate(value, out var d) ? d.ToString("yyyy/MM/dd") : value ?? "—";
 
