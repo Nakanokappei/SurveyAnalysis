@@ -1,13 +1,13 @@
 using System;
-using System.Drawing;
 using System.Windows.Forms;
 
 namespace SurveyAnalysis.WinForms;
 
 // A drop-down of enum values that displays a Japanese label per value (via a label function) while
 // carrying the underlying value. WinForms combo items show their ToString(), so each value is wrapped
-// with its label. Selecting an item reports the value; SelectValue picks the matching item.
-internal sealed class EnumCombo<TEnum> : ComboBox where TEnum : struct, Enum
+// with its label. Selecting an item reports the value; SelectValue picks the matching item. Inherits the
+// scroll-safe wheel behaviour (a closed drop-down forwards the wheel to the dialog) from the base.
+internal sealed class EnumCombo<TEnum> : ScrollSafeComboBox where TEnum : struct, Enum
 {
     private readonly Action<TEnum> _onPick;
     private bool _syncing;
@@ -20,25 +20,6 @@ internal sealed class EnumCombo<TEnum> : ComboBox where TEnum : struct, Enum
         foreach (var value in Enum.GetValues<TEnum>())
             Items.Add(new Item(value, label(value)));
         SelectedIndexChanged += OnPicked;
-    }
-
-    // The mouse wheel over a closed drop-down should scroll the dialog, not silently change the value
-    // (an easy mis-edit). When the list is open the wheel scrolls the list as usual; when it is closed
-    // the wheel is forwarded to the nearest auto-scroll parent instead.
-    protected override void OnMouseWheel(MouseEventArgs e)
-    {
-        if (DroppedDown)
-        {
-            base.OnMouseWheel(e);
-            return;
-        }
-        if (e is HandledMouseEventArgs handled)
-            handled.Handled = true;
-        var parent = Parent;
-        while (parent != null && parent is not ScrollableControl { AutoScroll: true })
-            parent = parent.Parent;
-        if (parent is ScrollableControl panel)
-            panel.AutoScrollPosition = new Point(-panel.AutoScrollPosition.X, -panel.AutoScrollPosition.Y - e.Delta);
     }
 
     public void SelectValue(TEnum value)

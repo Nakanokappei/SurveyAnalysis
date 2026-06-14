@@ -2,6 +2,7 @@ using System.Collections.Generic;
 using System.Collections.ObjectModel;
 using System.ComponentModel;
 using System.Linq;
+using System.Threading.Tasks;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using SurveyAnalysis.Data;
@@ -62,11 +63,21 @@ public partial class ImportViewModel : ViewModelBase
                 MappingOptions.Add(field.Name);
     }
 
-    // 選択されたCSVの中身を読み込み、ヘッダーから列を作り直してプレビューを表示する。
-    public void LoadCsv(byte[] bytes, string fileName)
-    {
-        var csv = CsvFile.Parse(bytes);
+    // 選択されたCSVの中身を読み込み、ヘッダーから列を作り直してプレビューを表示する（同期版・テスト用）。
+    public void LoadCsv(byte[] bytes, string fileName) => ApplyCsv(CsvFile.Parse(bytes), fileName);
 
+    // UI用の非同期版。重い解析（CsvFile.Parse）を背景スレッドで行い、その間UIを止めない。解析後に
+    // UIスレッドへ戻って列とプレビューをまとめて適用するので、表を1列ずつ更新せず大きなCSVでも滑らか。
+    public async Task LoadCsvAsync(byte[] bytes, string fileName)
+    {
+        StatusMessage = "CSVを読み込んでいます…";
+        var csv = await Task.Run(() => CsvFile.Parse(bytes));
+        ApplyCsv(csv, fileName);
+    }
+
+    // 解析済みのCSVをプレビューへ適用する：ヘッダーで列を作り直し、行を取り込み、状態を更新する。
+    private void ApplyCsv(CsvFile csv, string fileName)
+    {
         // 前回の列の購読を解除してから、ヘッダーで作り直す。
         foreach (var column in Columns)
             column.PropertyChanged -= OnColumnChanged;
