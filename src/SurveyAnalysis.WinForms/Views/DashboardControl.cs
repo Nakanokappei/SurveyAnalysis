@@ -19,7 +19,7 @@ internal sealed class DashboardControl : UserControl
 {
     private readonly DashboardViewModel _vm;
 
-    private readonly IconButton _rangeTrigger = new() { Glyph = "📅", IconSize = 9.5f, AutoSize = true, BackColor = Color.White, ForeColor = Theme.TitleText, Font = Theme.Font(10f), Padding = new Padding(10, 6, 10, 6), Cursor = Cursors.Hand, Anchor = AnchorStyles.None };
+    private readonly DateRangePicker _rangePicker = new();
     private readonly Label _breadcrumb = new() { AutoSize = true, ForeColor = Theme.Muted, Font = Theme.Font(10f), Margin = new Padding(0) };
     private readonly IconButton _drillUp = new() { Glyph = Icons.Back.Glyph, IconFontName = Icons.Back.Font, Text = "集計に戻る" };
     private readonly Label _totalResponses = new() { AutoSize = true, ForeColor = Theme.TitleText, Font = Theme.Font(22f, FontStyle.Bold), Margin = new Padding(0, 0, 0, 2) };
@@ -53,7 +53,8 @@ internal sealed class DashboardControl : UserControl
         _vm.TopicBars.CollectionChanged += OnTopicBarsChanged;
         _vm.SentimentBars.CollectionChanged += OnSentimentBarsChanged;
         _vm.Rows.CollectionChanged += OnRowsChanged;
-        _rangeTrigger.Click += (_, _) => OpenRangePopup();
+        _rangePicker.SetCurrent(_vm.Preset, _vm.From, _vm.To);
+        _rangePicker.RangeChanged += (preset, from, to) => _vm.SetRange(preset, from, to);
     }
 
     protected override void Dispose(bool disposing)
@@ -115,11 +116,9 @@ internal sealed class DashboardControl : UserControl
         titles.Controls.Add(new Label { Text = "ダッシュボード", AutoSize = true, ForeColor = Theme.TitleText, Font = Theme.Font(17f, FontStyle.Bold), Margin = new Padding(0) });
         titles.Controls.Add(_breadcrumb);
 
-        _rangeTrigger.FlatAppearance.BorderColor = Theme.CardBorder;
-        _rangeTrigger.FlatAppearance.BorderSize = 1;
         var picker = new FlowLayoutPanel { FlowDirection = FlowDirection.LeftToRight, WrapContents = false, AutoSize = true, Anchor = AnchorStyles.Right };
         picker.Controls.Add(new Label { Text = "対象期間", AutoSize = true, ForeColor = Theme.BodyText, Font = Theme.Font(10f), Anchor = AnchorStyles.None, Margin = new Padding(0, 0, 8, 0) });
-        picker.Controls.Add(_rangeTrigger);
+        picker.Controls.Add(_rangePicker.Trigger);
 
         header.Controls.Add(titles, 0, 0);
         header.Controls.Add(picker, 1, 0);
@@ -256,6 +255,8 @@ internal sealed class DashboardControl : UserControl
             RowHeadersVisible = false,
             BackgroundColor = Color.White,
             BorderStyle = BorderStyle.None,
+            // No gridlines between cells — a flat list, matching the welcome screen's project table.
+            CellBorderStyle = DataGridViewCellBorderStyle.None,
             SelectionMode = DataGridViewSelectionMode.FullRowSelect,
             MultiSelect = false,
             AutoSizeColumnsMode = DataGridViewAutoSizeColumnsMode.None,
@@ -265,6 +266,11 @@ internal sealed class DashboardControl : UserControl
         grid.ColumnHeadersDefaultCellStyle.Font = Theme.Font(9.5f, FontStyle.Bold);
         grid.ColumnHeadersDefaultCellStyle.BackColor = Theme.ContentBack;
         grid.ColumnHeadersDefaultCellStyle.ForeColor = Theme.Muted;
+        // Soft row-selection highlight (not the heavy system blue), like the welcome table.
+        grid.DefaultCellStyle.BackColor = Color.White;
+        grid.DefaultCellStyle.ForeColor = Theme.TitleText;
+        grid.DefaultCellStyle.SelectionBackColor = Color.FromArgb(0xD6, 0xE6, 0xF5);
+        grid.DefaultCellStyle.SelectionForeColor = Theme.TitleText;
         // No header highlight for the selected column: keep the selected-state header colours the same as
         // the normal ones (otherwise FullRowSelect tints the current column's header).
         grid.ColumnHeadersDefaultCellStyle.SelectionBackColor = Theme.ContentBack;
@@ -285,18 +291,8 @@ internal sealed class DashboardControl : UserControl
     private void OnSentimentBarsChanged(object? sender, NotifyCollectionChangedEventArgs e) => RefreshBars(_sentimentBars, _vm.SentimentBars, drillable: false);
     private void OnRowsChanged(object? sender, NotifyCollectionChangedEventArgs e) => RefreshTable();
 
-    // Opens the 対象期間 picker below the trigger; applying a range pushes it into the view model.
-    private void OpenRangePopup()
-    {
-        var popup = new DateRangePopup(_vm.Preset, _vm.From, _vm.To);
-        popup.Applied += (preset, from, to) => _vm.SetRange(preset, from, to);
-        popup.ShowBelow(_rangeTrigger);
-    }
-
     private void RefreshScalars()
     {
-        _rangeTrigger.Text = _vm.RangeLabel;
-
         _breadcrumb.Text = _vm.Breadcrumb;
         _totalResponses.Text = _vm.TotalResponses.ToString();
         _negative.Text = _vm.NegativeDisplay;

@@ -70,9 +70,24 @@ internal sealed class WelcomeControl : UserControl
         if (_vm.HasRecentProjects)
             card.Controls.Add(RecentProjectsList());
 
-        card.Controls.Add(PrimaryButton("➕", "プロジェクトを作る", () => _vm.CreateProjectCommand.Execute(null)));
-        card.Controls.Add(OutlineButton("CSV からプロジェクトを作る", () => _vm.CreateFromCsvCommand.Execute(null)));
-        card.Controls.Add(LinkButton("サンプルプロジェクトを開く", () => _vm.OpenSampleCommand.Execute(null)));
+        // The three actions live in a fixed-width (ContentWidth) column that is centered in the wider
+        // card (Anchor=None). Every button fills that column (Anchor=Left|Right), so they are all the
+        // same width and the group is centred — regardless of each button's own content width.
+        var buttons = new TableLayoutPanel
+        {
+            ColumnCount = 1,
+            AutoSize = true,
+            AutoSizeMode = AutoSizeMode.GrowAndShrink,
+            GrowStyle = TableLayoutPanelGrowStyle.AddRows,
+            Anchor = AnchorStyles.None,
+            BackColor = Theme.ContentBack,
+            Margin = new Padding(0),
+        };
+        buttons.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, ContentWidth));
+        buttons.Controls.Add(PrimaryButton("➕", "プロジェクトを作る", () => _vm.CreateProjectCommand.Execute(null)));
+        buttons.Controls.Add(OutlineButton("CSV からプロジェクトを作る", () => _vm.CreateFromCsvCommand.Execute(null)));
+        buttons.Controls.Add(LinkButton("サンプルプロジェクトを開く", () => _vm.OpenSampleCommand.Execute(null)));
+        card.Controls.Add(buttons);
 
         root.Controls.Add(card, 0, 0);
         Controls.Add(root);
@@ -184,10 +199,9 @@ internal sealed class WelcomeControl : UserControl
         return grid;
     }
 
-    // Action button at the heading width (ContentWidth), centered under the heading rather than spanning
-    // the wider card. AutoSize + Padding set its height; MinimumSize pins its width. An 8 DIP top margin
-    // gives a uniform 8 DIP gap between the stacked buttons (the control above carries no bottom margin).
-    // Instance method so the width/gap can be converted for the DPI.
+    // An action button that fills the centred ContentWidth buttons column (Anchor=Left|Right), so all
+    // three are the same width; AutoSize + Padding set the height. An 8 DIP top margin gives a uniform
+    // gap between the stacked buttons. Instance method so the gap can be converted for the DPI.
     private Button BaseButton(string glyph, string text, Action onClick) =>
         WithClick(new IconButton
         {
@@ -195,8 +209,7 @@ internal sealed class WelcomeControl : UserControl
             Text = text,
             AutoSize = true,
             AutoSizeMode = AutoSizeMode.GrowAndShrink,
-            Anchor = AnchorStyles.None,
-            MinimumSize = new Size(ContentWidth, 0),
+            Anchor = AnchorStyles.Left | AnchorStyles.Right,
             Font = Theme.Font(10.5f),
             TextAlign = ContentAlignment.MiddleCenter,
             Padding = new Padding(12, 9, 12, 9),

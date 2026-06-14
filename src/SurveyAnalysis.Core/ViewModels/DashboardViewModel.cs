@@ -26,19 +26,12 @@ public partial class DashboardViewModel : ViewModelBase
     private readonly string? _excerptFieldName;
     private string? _drilledTopic;
 
-    // The active 対象期間 (date range): a preset window or a custom [from, to] picked on the calendar.
-    private DateRangePreset _preset = DateRangePreset.Last30Days;
-    private DateTime _from;
-    private DateTime _to;
-
-    public DateRangePreset Preset => _preset;
-    public DateTime From => _from;
-    public DateTime To => _to;
-
-    // The picker button's text: the preset's name, or the custom range as dates.
-    public string RangeLabel => _preset == DateRangePreset.Custom
-        ? $"{_from:yyyy/MM/dd} 〜 {_to:yyyy/MM/dd}"
-        : DateRangePresetInfo.Label(_preset);
+    // The active 対象期間 — the same selection model the slices use (default 直近30日).
+    private readonly DateRangeSelection _range = new();
+    public DateRangePreset Preset => _range.Preset;
+    public DateTime From => _range.From;
+    public DateTime To => _range.To;
+    public string RangeLabel => _range.Label;
 
     // Breadcrumb shown above the charts, e.g. "直近30日" or "直近30日 ＞ 配線・接続".
     [ObservableProperty]
@@ -83,11 +76,6 @@ public partial class DashboardViewModel : ViewModelBase
     {
         _project = project;
 
-        // Default 対象期間 = 直近30日 (ending today).
-        var (from, to) = DateRangePresetInfo.Range(DateRangePreset.Last30Days, DateTime.Today)!.Value;
-        _from = from;
-        _to = to;
-
         // The aggregation date field gives each response its 記入日 and decides whether it falls in the
         // selected range; the excerpt comes from a free-text (or sentiment) field — never from PII.
         _aggregationFieldName = project.Fields.FirstOrDefault(f => f.UseForAggregation)?.Name;
@@ -107,9 +95,7 @@ public partial class DashboardViewModel : ViewModelBase
     // [from, to]; a preset's range is recomputed by the caller (the picker) so it stays anchored at today.
     public void SetRange(DateRangePreset preset, DateTime from, DateTime to)
     {
-        _preset = preset;
-        _from = from.Date;
-        _to = to.Date;
+        _range.Set(preset, from, to);
         OnPropertyChanged(nameof(RangeLabel));
         ShowOverview();
     }
@@ -159,7 +145,7 @@ public partial class DashboardViewModel : ViewModelBase
         foreach (var response in responses)
         {
             response.TryGetValue(_aggregationFieldName, out var dateValue);
-            if (TryParseDate(dateValue, out var date) && date.Date >= _from && date.Date <= _to)
+            if (TryParseDate(dateValue, out var date) && date.Date >= _range.From && date.Date <= _range.To)
                 result.Add(response);
         }
         return result;

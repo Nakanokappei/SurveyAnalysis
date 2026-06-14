@@ -16,6 +16,7 @@ internal sealed class SliceControl : UserControl
     private readonly Label _countSummary = new() { AutoSize = true, ForeColor = Theme.Muted, Font = Theme.Font(10f), Margin = new Padding(0) };
     private readonly Label _empty = new() { AutoSize = true, ForeColor = Theme.Faint, Font = Theme.Font(9.5f), Margin = new Padding(0, 0, 0, 6) };
     private readonly DataGridView _analysisGrid;
+    private readonly DateRangePicker _rangePicker = new();
 
     public SliceControl(SliceViewModel vm)
     {
@@ -56,11 +57,9 @@ internal sealed class SliceControl : UserControl
         titles.Controls.Add(_countSummary);
 
         header.Controls.Add(titles, 0, 0);
-        // The picker pushes the new period into the view model (which reloads synchronously); refresh the
-        // table afterwards. This handler runs after the picker's own value-push handler.
-        var picker = SliceTableView.BuildPeriodPicker(_vm, out var periodCombo);
-        periodCombo.SelectedIndexChanged += (_, _) => RefreshAll();
-        header.Controls.Add(picker, 1, 0);
+        // The picker pushes the new range into the view model (which reloads synchronously); RefreshAll
+        // re-reads the table afterwards.
+        header.Controls.Add(SliceTableView.BuildPeriodPicker(_vm, _rangePicker, RefreshAll), 1, 0);
         return header;
     }
 

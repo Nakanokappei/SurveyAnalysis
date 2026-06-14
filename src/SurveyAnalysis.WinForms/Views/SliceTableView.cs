@@ -29,38 +29,18 @@ internal static class SliceTableView
         return panel;
     }
 
-    // The 集計期間 picker (label + dropdown) shown top-right. The choices come from the view model in the
-    // spec's order (widest first, 2年 → 7日); the current selection is written back on pick. ComboBox's
-    // SelectedItem binding does not write back (HANDOFF §7), so the value is pushed through
-    // SelectedIndexChanged, guarded against the programmatic initial selection.
-    public static FlowLayoutPanel BuildPeriodPicker(PeriodScopedViewModel vm, out ComboBox combo)
+    // The 対象期間 picker (label + the shared DateRangePicker trigger) shown top-right — the same picker the
+    // dashboard uses. Seeds the trigger from the view model and, when the user applies a range, pushes it
+    // into the VM (which re-runs the aggregation) and refreshes the screen via onChanged.
+    public static Control BuildPeriodPicker(PeriodScopedViewModel vm, DateRangePicker picker, Action onChanged)
     {
-        var periods = vm.Periods;
-        var box = new ComboBox
-        {
-            DropDownStyle = ComboBoxStyle.DropDownList,
-            Font = Theme.Font(9.5f),
-            AutoSize = true,
-            Anchor = AnchorStyles.None,
-        };
-        foreach (var period in periods)
-            box.Items.Add(AggregationPeriodInfo.Label(period));
+        picker.SetCurrent(vm.Preset, vm.From, vm.To);
+        picker.RangeChanged += (preset, from, to) => { vm.SetRange(preset, from, to); onChanged(); };
 
-        var syncing = false;
-        box.SelectedIndexChanged += (_, _) =>
-        {
-            if (!syncing && box.SelectedIndex >= 0)
-                vm.SelectedPeriod = periods[box.SelectedIndex];
-        };
-        syncing = true;
-        box.SelectedIndex = Array.IndexOf(periods, vm.SelectedPeriod);
-        syncing = false;
-
-        var picker = new FlowLayoutPanel { FlowDirection = FlowDirection.LeftToRight, WrapContents = false, AutoSize = true, Anchor = AnchorStyles.Right };
-        picker.Controls.Add(new Label { Text = "集計期間", AutoSize = true, ForeColor = Theme.BodyText, Font = Theme.Font(10f), Anchor = AnchorStyles.None, Margin = new Padding(0, 0, 8, 0) });
-        picker.Controls.Add(box);
-        combo = box;
-        return picker;
+        var panel = new FlowLayoutPanel { FlowDirection = FlowDirection.LeftToRight, WrapContents = false, AutoSize = true, Anchor = AnchorStyles.Right };
+        panel.Controls.Add(new Label { Text = "対象期間", AutoSize = true, ForeColor = Theme.BodyText, Font = Theme.Font(10f), Anchor = AnchorStyles.None, Margin = new Padding(0, 0, 8, 0) });
+        panel.Controls.Add(picker.Trigger);
+        return panel;
     }
 
     // The analysis table: a leading dimension column then one column per project field, each headed by

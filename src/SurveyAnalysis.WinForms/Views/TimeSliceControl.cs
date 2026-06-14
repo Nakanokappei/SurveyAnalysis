@@ -23,6 +23,7 @@ internal sealed class TimeSliceControl : UserControl
     private readonly FlowLayoutPanel _navBar = new() { FlowDirection = FlowDirection.LeftToRight, WrapContents = false, AutoSize = true, AutoSizeMode = AutoSizeMode.GrowAndShrink, BackColor = Theme.ContentBack, Anchor = AnchorStyles.Left, Margin = new Padding(0) };
     private readonly DataGridView _analysisGrid;
     private readonly DataGridView _responsesGrid = SliceTableView.BuildResponsesGrid();
+    private readonly DateRangePicker _rangePicker = new();
 
     public TimeSliceControl(TimeSliceViewModel vm)
     {
@@ -66,11 +67,9 @@ internal sealed class TimeSliceControl : UserControl
         titles.Controls.Add(_scopeSummary);
 
         header.Controls.Add(titles, 0, 0);
-        // The picker pushes the new period into the view model (which reloads synchronously); refresh
-        // the table afterwards. This handler runs after the picker's own value-push handler.
-        var picker = SliceTableView.BuildPeriodPicker(_vm, out var periodCombo);
-        periodCombo.SelectedIndexChanged += (_, _) => RefreshAll();
-        header.Controls.Add(picker, 1, 0);
+        // The picker pushes the new range into the view model (which reloads synchronously); RefreshAll
+        // re-reads the table afterwards.
+        header.Controls.Add(SliceTableView.BuildPeriodPicker(_vm, _rangePicker, RefreshAll), 1, 0);
         return header;
     }
 

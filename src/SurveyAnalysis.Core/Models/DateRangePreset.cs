@@ -30,7 +30,7 @@ public static class DateRangePresetInfo
 
     public static string Label(DateRangePreset preset) => preset switch
     {
-        DateRangePreset.Today => "当日",
+        DateRangePreset.Today => "今日",
         DateRangePreset.Yesterday => "昨日",
         DateRangePreset.Last7Days => "直近7日",
         DateRangePreset.Last30Days => "直近30日",
@@ -39,8 +39,9 @@ public static class DateRangePresetInfo
         _ => preset.ToString(),
     };
 
-    // The inclusive [from, to] range for a preset, anchored at today (date-only). 直近N日 includes today
-    // (N days ending today). Custom returns null — the caller supplies the user-picked range.
+    // The inclusive [from, to] range for a preset, anchored at today (date-only). 直近N日 ends yesterday
+    // (N days up to yesterday) — today's responses are likely still incomplete. Custom returns null —
+    // the caller supplies the user-picked range.
     public static (DateTime From, DateTime To)? Range(DateRangePreset preset, DateTime today)
     {
         var t = today.Date;
@@ -48,9 +49,9 @@ public static class DateRangePresetInfo
         {
             DateRangePreset.Today => (t, t),
             DateRangePreset.Yesterday => (t.AddDays(-1), t.AddDays(-1)),
-            DateRangePreset.Last7Days => (t.AddDays(-6), t),
-            DateRangePreset.Last30Days => (t.AddDays(-29), t),
-            DateRangePreset.Last60Days => (t.AddDays(-59), t),
+            DateRangePreset.Last7Days => (t.AddDays(-7), t.AddDays(-1)),
+            DateRangePreset.Last30Days => (t.AddDays(-30), t.AddDays(-1)),
+            DateRangePreset.Last60Days => (t.AddDays(-60), t.AddDays(-1)),
             _ => null,
         };
     }

@@ -1,26 +1,32 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
-using CommunityToolkit.Mvvm.ComponentModel;
 using SurveyAnalysis.Models;
 
 namespace SurveyAnalysis.ViewModels;
 
-// Base for every 切り口 that carries the 集計期間 (date-window) dropdown shown top-right. The window is
-// the last N days ending today; it only narrows which responses are counted. Subclasses implement
-// Reload to re-run their aggregation when the period changes.
-public abstract partial class PeriodScopedViewModel : ViewModelBase
+// Base for every 切り口 that carries the 対象期間 (date-range) picker shown top-right — the same picker the
+// dashboard uses (DateRangeSelection). The range only narrows which responses are counted. Subclasses
+// implement Reload to re-run their aggregation when the range changes.
+public abstract class PeriodScopedViewModel : ViewModelBase
 {
-    // The dropdown choices and the current selection (default 90日).
-    public AggregationPeriod[] Periods => AggregationPeriodInfo.All;
+    private readonly DateRangeSelection _range = new();
 
-    [ObservableProperty]
-    private AggregationPeriod _selectedPeriod = AggregationPeriod.Days90;
+    // Current 対象期間 — read by the picker control to seed and label itself.
+    public DateRangePreset Preset => _range.Preset;
+    public DateTime From => _range.From;
+    public DateTime To => _range.To;
+    public string RangeLabel => _range.Label;
 
-    // The [from, to] date_key window for the current selection, anchored at today.
-    protected (long FromKey, long ToKey) Window => AggregationPeriodInfo.Window(SelectedPeriod, DateTime.Today);
+    // The [from, to] date_key window for the current selection.
+    protected (long FromKey, long ToKey) Window => _range.DateKeyWindow;
 
-    partial void OnSelectedPeriodChanged(AggregationPeriod value) => Reload();
+    // Applies a range chosen in the picker, then re-runs the slice's aggregation.
+    public void SetRange(DateRangePreset preset, DateTime from, DateTime to)
+    {
+        _range.Set(preset, from, to);
+        Reload();
+    }
 
     protected abstract void Reload();
 
