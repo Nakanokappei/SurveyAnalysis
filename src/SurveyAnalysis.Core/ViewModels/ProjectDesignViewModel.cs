@@ -212,8 +212,6 @@ public partial class ProjectDesignViewModel : ViewModelBase
         Analysis = source.Analysis,
         UseForAggregation = source.UseForAggregation,
         UseLoadDateAsDefault = source.UseLoadDateAsDefault,
-        EnableAlert = source.EnableAlert,
-        AlertThreshold = source.AlertThreshold,
     };
 
     // One row of the test preview table.

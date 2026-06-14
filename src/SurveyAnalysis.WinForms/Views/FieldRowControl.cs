@@ -6,12 +6,11 @@ using SurveyAnalysis.Models;
 
 namespace SurveyAnalysis.WinForms;
 
-// One survey-field row, laid out as a single row of a 10-column table (the project design dialog now
-// shows the data items as a table instead of per-field cards). The columns are shared with the header
-// row in ProjectDesignForm via DefineColumns, so everything lines up. Cells that only apply to certain
-// kinds of field are disabled when not applicable (月次集計 / 読み込み日 for 日付; アラート / 閾値 for
-// 感情), and the 暗号化 cell shows 🔒 only for personal-information types. Edits flow straight to the
-// DataField; the row re-syncs when the field's computed flags change.
+// One survey-field row, laid out as a single row of an 8-column table (the project design dialog shows
+// the data items as a table instead of per-field cards). The columns are shared with the header row in
+// ProjectDesignForm via DefineColumns, so everything lines up. 月次集計 / 読み込み日 only apply to 日付
+// fields and are disabled otherwise; the 暗号化 cell shows 🔒 only for personal-information types. Edits
+// flow straight to the DataField; the row re-syncs when the field's computed flags change.
 internal sealed class FieldRowControl : TableLayoutPanel
 {
     private readonly DataField _field;
@@ -20,22 +19,15 @@ internal sealed class FieldRowControl : TableLayoutPanel
     private readonly EnumCombo<AnalysisMethod> _analysis;
     private readonly CheckBox _useForAggregation = NewCheck();
     private readonly CheckBox _useLoadDate = NewCheck();
-    private readonly CheckBox _enableAlert = NewCheck();
-    private readonly NumericUpDown _threshold = new()
-    {
-        Minimum = -0.9m, Maximum = 0.5m, Increment = 0.1m, DecimalPlaces = 1,
-        Font = Theme.Font(9.5f), TextAlign = HorizontalAlignment.Right,
-        Anchor = AnchorStyles.None, Width = 56,
-    };
     private readonly Label _pii = new() { Text = "🔒", AutoSize = true, ForeColor = ColorTranslator.FromHtml("#92400E"), Font = Theme.Font(11f), Anchor = AnchorStyles.None, Margin = Padding.Empty };
 
     private bool _syncing;
 
-    // The 10 shared columns: 項目番号, 項目名, データ型, 分析方法, 月次集計, 読み込み日, アラート, 閾値,
-    // 暗号化, 削除. Width 0 = the flexible (Percent) column (項目名); the rest are fixed pixel widths. Used
-    // by both the header row (ProjectDesignForm) and every field row so they line up. Pixel widths — this
-    // dialog renders unscaled, like the rest of the app.
-    public static readonly int[] ColumnWidths = { 44, 0, 150, 140, 92, 112, 92, 80, 84, 64 };
+    // The 8 shared columns: #, 項目名, データ型, 分析方法, 月次集計, 読み込み日, 暗号化, 削除. Width 0 = the
+    // flexible (Percent) column (項目名); the rest are fixed pixel widths sized to their content (the
+    // combos and the 削除 button). Used by both the header row (ProjectDesignForm) and every field row so
+    // they line up. Pixel widths — this dialog renders unscaled, like the rest of the app.
+    public static readonly int[] ColumnWidths = { 48, 0, 176, 200, 96, 120, 96, 88 };
 
     public static void DefineColumns(TableLayoutPanel t)
     {
@@ -81,25 +73,20 @@ internal sealed class FieldRowControl : TableLayoutPanel
         Controls.Add(_analysis, 3, 0);
         Controls.Add(_useForAggregation, 4, 0);
         Controls.Add(_useLoadDate, 5, 0);
-        Controls.Add(_enableAlert, 6, 0);
-        Controls.Add(_threshold, 7, 0);
-        Controls.Add(_pii, 8, 0);
-        Controls.Add(remove, 9, 0);
+        Controls.Add(_pii, 6, 0);
+        Controls.Add(remove, 7, 0);
 
         // Initial values.
         _name.Text = _field.Name;
         _type.SelectValue(_field.FieldType);
         _analysis.SelectValue(_field.Analysis);
         SyncCheckboxes();
-        SyncThreshold();
         SyncEnabled();
 
         // Edits flow back to the field.
         _name.TextChanged += (_, _) => { if (!_syncing) _field.Name = _name.Text; };
         _useForAggregation.CheckedChanged += (_, _) => { if (!_syncing) _field.UseForAggregation = _useForAggregation.Checked; };
         _useLoadDate.CheckedChanged += (_, _) => { if (!_syncing) _field.UseLoadDateAsDefault = _useLoadDate.Checked; };
-        _enableAlert.CheckedChanged += (_, _) => { if (!_syncing) _field.EnableAlert = _enableAlert.Checked; };
-        _threshold.ValueChanged += (_, _) => { if (!_syncing) _field.AlertThreshold = (double)_threshold.Value; };
 
         _field.PropertyChanged += OnFieldChanged;
     }
@@ -136,9 +123,6 @@ internal sealed class FieldRowControl : TableLayoutPanel
             case nameof(DataField.UseLoadDateAsDefault):
                 SyncCheckboxes();
                 break;
-            case nameof(DataField.AlertThreshold):
-                SyncThreshold();
-                break;
         }
         SyncEnabled();
     }
@@ -148,25 +132,15 @@ internal sealed class FieldRowControl : TableLayoutPanel
         _syncing = true;
         _useForAggregation.Checked = _field.UseForAggregation;
         _useLoadDate.Checked = _field.UseLoadDateAsDefault;
-        _enableAlert.Checked = _field.EnableAlert;
         _syncing = false;
     }
 
-    private void SyncThreshold()
-    {
-        _syncing = true;
-        _threshold.Value = Math.Clamp((decimal)_field.AlertThreshold, _threshold.Minimum, _threshold.Maximum);
-        _syncing = false;
-    }
-
-    // Greys out the cells that do not apply to this field's type / analysis, and shows the 🔒 cell only
-    // for personal-information types — so every row keeps all ten columns while signalling what's active.
+    // Greys out the date-only cells when the field is not 日付, and shows the 🔒 cell only for
+    // personal-information types — so every row keeps all columns while signalling what's active.
     private void SyncEnabled()
     {
         _useForAggregation.Enabled = _field.IsDate;
         _useLoadDate.Enabled = _field.IsDate && _field.UseLoadDateAsDefaultEnabled;
-        _enableAlert.Enabled = _field.IsSentimentSelected;
-        _threshold.Enabled = _field.ShowThreshold;
         _pii.Visible = _field.IsPersonalInformation;
     }
 }

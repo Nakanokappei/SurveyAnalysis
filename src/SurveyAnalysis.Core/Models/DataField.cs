@@ -20,8 +20,6 @@ public partial class DataField : ObservableObject
 
     // 分析方法（なし / トピック割り当て / 感情極性分析）
     [ObservableProperty]
-    [NotifyPropertyChangedFor(nameof(IsSentimentSelected))]
-    [NotifyPropertyChangedFor(nameof(ShowThreshold))]
     private AnalysisMethod _analysis = AnalysisMethod.None;
 
     // 月次集計の基準日にする（日付型のときだけ意味を持つ。これが無いと月次集計できない）
@@ -32,21 +30,6 @@ public partial class DataField : ObservableObject
     // 読み込んだときの日付をデフォルト値にする（日付型のみ）。
     [ObservableProperty]
     private bool _useLoadDateAsDefault;
-
-    // アラートを発報する（不要なプロジェクトはオフにできる）
-    [ObservableProperty]
-    [NotifyPropertyChangedFor(nameof(ShowThreshold))]
-    private bool _enableAlert = true;
-
-    // アラート発報の閾値 (-0.9 most negative .. +0.5). Alert fires below this.
-    [ObservableProperty]
-    private double _alertThreshold = -0.5;
-
-    // 感情極性分析が選ばれているか（アラート発報チェックの表示条件）。
-    public bool IsSentimentSelected => Analysis == AnalysisMethod.Sentiment;
-
-    // 閾値スライダーの表示条件：感情極性分析かつアラート発報がオン。
-    public bool ShowThreshold => IsSentimentSelected && EnableAlert;
 
     // 日付型か（月次集計チェックボックスの表示条件）。
     public bool IsDate => FieldType == FieldType.Date;

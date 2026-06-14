@@ -115,8 +115,10 @@ public sealed class ProjectRepository
         insertField.Parameters.AddWithValue("$analysis", field.Analysis.ToString());
         insertField.Parameters.AddWithValue("$agg", field.UseForAggregation ? 1 : 0);
         insertField.Parameters.AddWithValue("$loadDate", field.UseLoadDateAsDefault ? 1 : 0);
-        insertField.Parameters.AddWithValue("$alert", field.EnableAlert ? 1 : 0);
-        insertField.Parameters.AddWithValue("$threshold", field.AlertThreshold);
+        // The alert columns are retained in the schema (NOT NULL) for backward compatibility but the
+        // feature was removed; write neutral defaults.
+        insertField.Parameters.AddWithValue("$alert", 1);
+        insertField.Parameters.AddWithValue("$threshold", -0.5);
         insertField.ExecuteNonQuery();
     }
 
@@ -183,8 +185,7 @@ public sealed class ProjectRepository
                     Analysis = Enum.Parse<AnalysisMethod>(reader.GetString(2)),
                     UseForAggregation = reader.GetInt32(3) != 0,
                     UseLoadDateAsDefault = reader.GetInt32(4) != 0,
-                    EnableAlert = reader.GetInt32(5) != 0,
-                    AlertThreshold = reader.GetDouble(6),
+                    // columns 5/6 (enable_alert, alert_threshold) are retained but unused.
                 });
             }
         }

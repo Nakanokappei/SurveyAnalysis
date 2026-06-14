@@ -21,6 +21,7 @@ internal sealed class ProjectDesignForm : Form
     private readonly Panel _content = new() { Dock = DockStyle.Fill, AutoScroll = true, BackColor = ColorTranslator.FromHtml("#F8FAFC"), Padding = new Padding(28) };
     private readonly TextBox _projectName = new() { Font = Theme.Font(10f), Anchor = AnchorStyles.Left | AnchorStyles.Right, Margin = new Padding(0, 2, 0, 0) };
     private readonly TableLayoutPanel _fields = NewStack();
+    private TableLayoutPanel _columnHeader = null!;
     private readonly Button _addField = new() { Text = "＋ 項目を追加", AutoSize = true, AutoSizeMode = AutoSizeMode.GrowAndShrink, Anchor = AnchorStyles.Left | AnchorStyles.Right, FlatStyle = FlatStyle.Flat, BackColor = Color.White, ForeColor = Theme.Accent, Font = Theme.Font(10f), Padding = new Padding(0, 11, 0, 11), Margin = Padding.Empty, Cursor = Cursors.Hand };
     private readonly Button _confirm = new() { FlatStyle = FlatStyle.Flat, BackColor = Theme.Accent, ForeColor = Color.White, Font = Theme.Font(10f, FontStyle.Bold), Padding = new Padding(18, 6, 18, 6), AutoSize = true, Cursor = Cursors.Hand, Anchor = AnchorStyles.None, Margin = new Padding(12, 0, 0, 0) };
     private readonly Label _intro = new() { Text = "アンケート用紙の各項目に、データ型と分析方法を割り当てます。", AutoSize = true, ForeColor = Theme.Muted, Font = Theme.Font(9.5f), Anchor = AnchorStyles.Left, Margin = new Padding(0, 0, 0, 14) };
@@ -84,15 +85,23 @@ internal sealed class ProjectDesignForm : Form
         nameInner.Controls.Add(_projectName);
         nameCard.Controls.Add(nameInner);
 
-        // Vertical stack of sections; each section is anchored to fill the content width.
-        var stack = NewStack();
-        AddSection(stack, _intro);
-        AddSection(stack, nameCard);
-        AddSection(stack, _header);
-        AddSection(stack, BuildColumnHeader());
-        AddSection(stack, _fields);
-        AddSection(stack, _addField);
-        _content.Controls.Add(stack);
+        // Fixed top area: intro, project name, the data-items title and the table's column header — it
+        // stays put while the field rows scroll below it.
+        var topArea = NewStack();
+        topArea.Dock = DockStyle.Top;
+        topArea.Padding = new Padding(28, 28, 28, 0);
+        AddSection(topArea, _intro);
+        AddSection(topArea, nameCard);
+        AddSection(topArea, _header);
+        _columnHeader = BuildColumnHeader();
+        AddSection(topArea, _columnHeader);
+
+        // Scrolling area (the existing AutoScroll panel): only the field rows and the add button.
+        var rows = NewStack();
+        AddSection(rows, _fields);
+        AddSection(rows, _addField);
+        _content.Padding = new Padding(28, 4, 28, 8);
+        _content.Controls.Add(rows);
 
         // Bottom action bar: a spacer column pushes キャンセル / 確定 to the right, vertically centred.
         var bar = new TableLayoutPanel { Dock = DockStyle.Bottom, ColumnCount = 3, RowCount = 1, AutoSize = true, AutoSizeMode = AutoSizeMode.GrowAndShrink, BackColor = ColorTranslator.FromHtml("#F8FAFC"), Padding = new Padding(28, 10, 28, 10) };
@@ -108,15 +117,28 @@ internal sealed class ProjectDesignForm : Form
         bar.Controls.Add(cancel, 1, 0);
         bar.Controls.Add(_confirm, 2, 0);
 
-        // Fill added first so it yields the bottom edge to the docked action bar.
+        // Fill added first so it yields its edges to the docked top area and action bar.
         Controls.Add(_content);
+        Controls.Add(topArea);
         Controls.Add(bar);
+
+        // Keep the column header aligned with the rows once the rows get a vertical scrollbar.
+        _content.Layout += (_, _) => SyncHeaderToScrollbar();
+    }
+
+    // When the field list scrolls vertically its rows lose the scrollbar's width; inset the (fixed)
+    // header by the same amount so the columns stay lined up.
+    private void SyncHeaderToScrollbar()
+    {
+        var scrollbar = _content.VerticalScroll.Visible ? SystemInformation.VerticalScrollBarWidth : 0;
+        if (_columnHeader.Margin.Right != scrollbar)
+            _columnHeader.Margin = new Padding(_columnHeader.Margin.Left, _columnHeader.Margin.Top, scrollbar, _columnHeader.Margin.Bottom);
     }
 
     // The table's column header: the 10 captions over the field rows, using the same shared columns so
     // they align. Captions wrap within their fixed-width columns; the long boolean headers therefore
     // stack onto a few lines.
-    private static Control BuildColumnHeader()
+    private static TableLayoutPanel BuildColumnHeader()
     {
         var header = new TableLayoutPanel
         {
@@ -132,7 +154,7 @@ internal sealed class ProjectDesignForm : Form
         var captions = new[]
         {
             "#", "項目名", "データ型", "分析方法", "月次集計に使う",
-            "読み込み日をデフォルトにする", "アラートを発報する", "アラート閾値", "暗号化・非表示", "削除",
+            "読み込み日をデフォルトにする", "暗号化・非表示", "削除",
         };
         for (var i = 0; i < captions.Length; i++)
         {

@@ -15,7 +15,7 @@ public class ProjectRepositoryTests
         var project = new Project { Name = "○○ケーブル 工事アンケート" };
         project.Fields.Add(new DataField { Name = "氏名", FieldType = FieldType.Name, Analysis = AnalysisMethod.None });
         project.Fields.Add(new DataField { Name = "記入日", FieldType = FieldType.Date, Analysis = AnalysisMethod.None, UseForAggregation = true });
-        project.Fields.Add(new DataField { Name = "ご意見・ご要望", FieldType = FieldType.FreeText, Analysis = AnalysisMethod.Sentiment, AlertThreshold = -0.7 });
+        project.Fields.Add(new DataField { Name = "ご意見・ご要望", FieldType = FieldType.FreeText, Analysis = AnalysisMethod.Sentiment });
         project.Months.Add("2026年5月");
         project.Months.Add("2026年4月");
 
@@ -40,7 +40,6 @@ public class ProjectRepositoryTests
 
         var sentiment = loaded.Fields[2];
         Assert.Equal(AnalysisMethod.Sentiment, sentiment.Analysis);
-        Assert.Equal(-0.7, sentiment.AlertThreshold, precision: 3);
 
         Assert.Equal(new[] { "2026年5月", "2026年4月" }, loaded.Months);
     }
@@ -110,7 +109,7 @@ public class ProjectRepositoryTests
         // Edited draft: rename, drop 記入日, add a sentiment field — carrying the existing id.
         var draft = new Project { Id = id, Name = "新しい名前" };
         draft.Fields.Add(new DataField { Name = "氏名", FieldType = FieldType.Name });
-        draft.Fields.Add(new DataField { Name = "ご意見", FieldType = FieldType.FreeText, Analysis = AnalysisMethod.Sentiment, AlertThreshold = -0.6 });
+        draft.Fields.Add(new DataField { Name = "ご意見", FieldType = FieldType.FreeText, Analysis = AnalysisMethod.Sentiment });
         repo.Update(draft);
 
         var loaded = repo.Load(id);
@@ -122,7 +121,6 @@ public class ProjectRepositoryTests
         Assert.Equal("氏名", loaded.Fields[0].Name);
         Assert.Equal("ご意見", loaded.Fields[1].Name);
         Assert.Equal(AnalysisMethod.Sentiment, loaded.Fields[1].Analysis);
-        Assert.Equal(-0.6, loaded.Fields[1].AlertThreshold, precision: 3);
 
         // Months are not touched by a schema edit.
         Assert.Equal(new[] { "2026年5月", "2026年4月" }, loaded.Months);
