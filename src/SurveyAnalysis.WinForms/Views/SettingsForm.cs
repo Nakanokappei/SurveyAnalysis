@@ -97,8 +97,8 @@ internal sealed class SettingsForm : Form
     {
         var page = NewPage("メール");
         var grid = NewGrid();
-        AddRow(grid, "差出人", Bound(new TextBox(), nameof(_vm.MailFrom)));
-        AddRow(grid, "宛先", Bound(new TextBox(), nameof(_vm.MailTo)));
+        AddRow(grid, "差出人", BoundAscii(new TextBox(), nameof(_vm.MailFrom)));
+        AddRow(grid, "宛先", BoundAscii(new TextBox(), nameof(_vm.MailTo)));
 
         var serverType = new ComboBox { DropDownStyle = ComboBoxStyle.DropDownList, Width = 160 };
         foreach (var option in _vm.MailServerOptions)
@@ -107,14 +107,14 @@ internal sealed class SettingsForm : Form
         AddRow(grid, "メールサーバー種別", serverType);
 
         // Gmail rows (shown when 種別 = Gmail) — same row style as the rest, not a boxed sub-panel.
-        AddToggleRow(grid, "Gmail アドレス", Bound(new TextBox(), nameof(_vm.GmailAddress)), nameof(_vm.IsGmail));
-        AddToggleRow(grid, "アプリパスワード", Bound(new TextBox { UseSystemPasswordChar = true }, nameof(_vm.GmailAppPassword)), nameof(_vm.IsGmail));
+        AddToggleRow(grid, "Gmail アドレス", BoundAscii(new TextBox(), nameof(_vm.GmailAddress)), nameof(_vm.IsGmail));
+        AddToggleRow(grid, "アプリパスワード", BoundAscii(new TextBox { UseSystemPasswordChar = true }, nameof(_vm.GmailAppPassword)), nameof(_vm.IsGmail));
 
         // SMTP rows (shown when 種別 = SMTP).
-        AddToggleRow(grid, "ホスト", Bound(new TextBox(), nameof(_vm.SmtpHost)), nameof(_vm.IsSmtp));
-        AddToggleRow(grid, "ポート", Bound(new TextBox(), nameof(_vm.SmtpPort)), nameof(_vm.IsSmtp));
-        AddToggleRow(grid, "ユーザー名", Bound(new TextBox(), nameof(_vm.SmtpUsername)), nameof(_vm.IsSmtp));
-        AddToggleRow(grid, "パスワード", Bound(new TextBox { UseSystemPasswordChar = true }, nameof(_vm.SmtpPassword)), nameof(_vm.IsSmtp));
+        AddToggleRow(grid, "ホスト", BoundAscii(new TextBox(), nameof(_vm.SmtpHost)), nameof(_vm.IsSmtp));
+        AddToggleRow(grid, "ポート", BoundNumber(nameof(_vm.SmtpPort), 5), nameof(_vm.IsSmtp));
+        AddToggleRow(grid, "ユーザー名", BoundAscii(new TextBox(), nameof(_vm.SmtpUsername)), nameof(_vm.IsSmtp));
+        AddToggleRow(grid, "パスワード", BoundAscii(new TextBox { UseSystemPasswordChar = true }, nameof(_vm.SmtpPassword)), nameof(_vm.IsSmtp));
         AddToggleRow(grid, "", BoundCheck(new CheckBox { Text = "TLS を使う", AutoSize = true }, nameof(_vm.SmtpUseTls)), nameof(_vm.IsSmtp));
 
         page.Controls.Add(grid);
@@ -127,8 +127,8 @@ internal sealed class SettingsForm : Form
     {
         var page = NewPage("LLM");
         var grid = NewGrid();
-        AddRow(grid, "API キー", Bound(new TextBox { UseSystemPasswordChar = true }, nameof(_vm.ApiKey)));
-        AddRow(grid, "エンドポイント", Bound(new TextBox(), nameof(_vm.Endpoint)));
+        AddRow(grid, "API キー", BoundAscii(new TextBox { UseSystemPasswordChar = true }, nameof(_vm.ApiKey)));
+        AddRow(grid, "エンドポイント", BoundAscii(new TextBox(), nameof(_vm.Endpoint)));
         AddRow(grid, "OCR モデル", ModelCombo(() => _vm.OcrModel, v => _vm.OcrModel = v, nameof(_vm.OcrModel)));
         AddRow(grid, "トピック モデル", ModelCombo(() => _vm.TopicModel, v => _vm.TopicModel = v, nameof(_vm.TopicModel)));
         AddRow(grid, "感情 モデル", ModelCombo(() => _vm.SentimentModel, v => _vm.SentimentModel = v, nameof(_vm.SentimentModel)));
@@ -233,6 +233,28 @@ internal sealed class SettingsForm : Form
         box.Font = Theme.Font(9.5f);
         box.DataBindings.Add("Text", _vm, property, false, DataSourceUpdateMode.OnPropertyChanged);
         return box;
+    }
+
+    // Like Bound, but with the IME disabled — for fields that never take Japanese (e-mail, host, port,
+    // API key, endpoint, ...). Fields that may take Japanese (会社名, folder, archive name) use Bound.
+    private TextBox BoundAscii(TextBox box, string property)
+    {
+        box.ImeMode = ImeMode.Disable;
+        return Bound(box, property);
+    }
+
+    // A fixed-width numeric field (IME off), sized to (maxDigits + 2) characters and left-aligned —
+    // wrapped in an auto-size holder so the row styling does not stretch it to the whole column.
+    private Control BoundNumber(string property, int maxDigits)
+    {
+        var box = BoundAscii(new TextBox(), property);
+        // Measure at 96 dpi (a default Bitmap) — this form renders unscaled, so that matches on screen.
+        using var bitmap = new Bitmap(1, 1);
+        using var graphics = Graphics.FromImage(bitmap);
+        box.Width = (int)System.Math.Ceiling(graphics.MeasureString(new string('0', maxDigits + 2), box.Font).Width) + 8;
+        var holder = new FlowLayoutPanel { AutoSize = true, AutoSizeMode = AutoSizeMode.GrowAndShrink, WrapContents = false, Margin = new Padding(0) };
+        holder.Controls.Add(box);
+        return holder;
     }
 
     private CheckBox BoundCheck(CheckBox box, string property)
