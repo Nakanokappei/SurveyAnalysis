@@ -1,7 +1,6 @@
 using System;
 using System.Collections.Generic;
 using System.Collections.ObjectModel;
-using System.Globalization;
 using System.Linq;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
@@ -11,17 +10,18 @@ using SurveyAnalysis.Models;
 namespace SurveyAnalysis.ViewModels;
 
 // The dashboard shown in the main pane: KPIs, a topic bar chart, a sentiment bar chart, and a
-// table — for the selected month. Saved projects aggregate their real imported responses; the
-// bundled sample project (not persisted, Id 0) keeps the illustrative dummy data so the full
-// layout stays reviewable. Topic and sentiment need LLM analysis (not yet implemented), so for
-// real projects those are shown as pending; total responses and the answer list are real.
+// table — for the selected 対象期間. Saved projects aggregate their real imported responses through the
+// analytics star (the same source the slices use, so the two never diverge); the bundled sample
+// project (not persisted, Id 0) keeps the illustrative dummy data so the full layout stays reviewable.
+// Topic and sentiment need LLM analysis (not yet implemented), so for real projects those are shown as
+// pending; total responses and the answer list are real.
 public partial class DashboardViewModel : ViewModelBase
 {
     private const double MaxBarWidth = 180;
 
-    private readonly Project _project;
     private readonly bool _isSample;
-    private readonly IReadOnlyList<IReadOnlyDictionary<string, string>> _loaded;
+    private readonly long _projectId;
+    private readonly AnalyticsRepository _analytics;
     private readonly string? _aggregationFieldName;
     private readonly string? _excerptFieldName;
     private string? _drilledTopic;
@@ -72,9 +72,10 @@ public partial class DashboardViewModel : ViewModelBase
     public ObservableCollection<BarItem> SentimentBars { get; } = new();
     public ObservableCollection<SurveyRow> Rows { get; } = new();
 
-    public DashboardViewModel(Project project, ResponseRepository responses)
+    public DashboardViewModel(Project project, AnalyticsRepository analytics)
     {
-        _project = project;
+        _projectId = project.Id;
+        _analytics = analytics;
 
         // The aggregation date field gives each response its 記入日 and decides whether it falls in the
         // selected range; the excerpt comes from a free-text (or sentiment) field — never from PII.
@@ -84,9 +85,10 @@ public partial class DashboardViewModel : ViewModelBase
             ?? project.Fields.FirstOrDefault(f => f.Analysis == AnalysisMethod.Sentiment)?.Name;
 
         _isSample = project.Id == 0;
-        _loaded = _isSample
-            ? Array.Empty<IReadOnlyDictionary<string, string>>()
-            : responses.LoadForProject(project.Id);
+        // Keep the star current so the dashboard reflects the latest import (and survives the startup
+        // rebuild of the derived tables); the sample project is not persisted, so it stays on dummy data.
+        if (!_isSample)
+            _analytics.Rebuild(project);
 
         ShowOverview();
     }
@@ -114,8 +116,9 @@ public partial class DashboardViewModel : ViewModelBase
             ShowRealOverview();
     }
 
-    // Real overview: total responses and the answer list come from imported data; topic/sentiment
-    // analytics are left empty and marked pending until LLM analysis exists.
+    // Real overview: total responses and the answer list come from the analytics star, filtered to the
+    // selected 対象期間 (dated responses within the window, newest first). Topic/sentiment analytics are
+    // left empty and marked pending until LLM analysis exists.
     private void ShowRealOverview()
     {
         AnalysisPending = true;
@@ -124,31 +127,14 @@ public partial class DashboardViewModel : ViewModelBase
         TopicBars.Clear();
         SentimentBars.Clear();
 
-        var inRange = FilterByRange(_loaded);
+        var (fromKey, toKey) = _range.DateKeyWindow;
+        var inRange = _analytics.ResponsesForScope(_projectId, TimeScope.Root, fromKey, toKey, newestFirst: true);
         TotalResponses = inRange.Count;
         HasNoResponses = inRange.Count == 0;
 
         Rows.Clear();
         foreach (var response in inRange)
             Rows.Add(BuildRow(response));
-    }
-
-    // Keeps only responses whose aggregation-date answer falls in the selected [from, to] range
-    // (inclusive). With no aggregation field the date cannot be determined, so all responses are shown.
-    private IReadOnlyList<IReadOnlyDictionary<string, string>> FilterByRange(
-        IReadOnlyList<IReadOnlyDictionary<string, string>> responses)
-    {
-        if (_aggregationFieldName is null)
-            return responses;
-
-        var result = new List<IReadOnlyDictionary<string, string>>();
-        foreach (var response in responses)
-        {
-            response.TryGetValue(_aggregationFieldName, out var dateValue);
-            if (TryParseDate(dateValue, out var date) && date.Date >= _range.From && date.Date <= _range.To)
-                result.Add(response);
-        }
-        return result;
     }
 
     // Builds one table row from a response: 記入日 from the aggregation date, the excerpt from the
@@ -254,19 +240,7 @@ public partial class DashboardViewModel : ViewModelBase
 
     // ===== Date helpers =====
 
-    private static readonly string[] DateFormats =
-        { "yyyy/MM/dd", "yyyy-MM-dd", "yyyy/M/d", "yyyy-M-d", "yyyy年M月d日" };
-
-    private static bool TryParseDate(string? value, out DateTime date)
-    {
-        date = default;
-        if (string.IsNullOrWhiteSpace(value))
-            return false;
-        return DateTime.TryParse(value, CultureInfo.InvariantCulture, DateTimeStyles.None, out date)
-            || DateTime.TryParseExact(value.Trim(), DateFormats, CultureInfo.InvariantCulture, DateTimeStyles.None, out date);
-    }
-
-    private static string FormatDate(string? value) => TryParseDate(value, out var d) ? d.ToString("yyyy/MM/dd") : value ?? "—";
+    private static string FormatDate(string? value) => DateParsing.TryParse(value, out var d) ? d.ToString("yyyy/MM/dd") : value ?? "—";
 
     private static string Truncate(string value, int max) => value.Length <= max ? value : value[..max] + "…";
 }

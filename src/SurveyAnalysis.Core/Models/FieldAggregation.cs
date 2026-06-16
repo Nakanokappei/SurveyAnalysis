@@ -57,10 +57,12 @@ public sealed record AnalysisRow(string Label, IReadOnlyList<string> Cells, int 
 public sealed record AnalysisTable(IReadOnlyList<AnalysisRow> Rows, AnalysisRow Total);
 
 // Which dimension the rows are grouped by. Time also carries a drill scope; the others are flat.
+// Choice groups by the values of one 選択肢 field (its id is passed alongside).
 public enum AnalysisGrouping
 {
     Time,
     Weekday,
     Region,
     Topic,
+    Choice,
 }

@@ -1,21 +1,21 @@
 using System;
 using System.Collections.Generic;
+using System.Linq;
 using Microsoft.Data.Sqlite;
 using SurveyAnalysis.Models;
 
 namespace SurveyAnalysis.Data;
 
-// Reads and writes projects — the project record plus its field definitions (データ項目) and
-// month labels — to SQLite. Fields and months are written and read in their on-screen order
-// via an explicit ordinal column.
+// Reads and writes projects — the project record plus its field definitions (データ項目) — to
+// SQLite. Fields are written and read in their on-screen order via an explicit ordinal column.
 public sealed class ProjectRepository
 {
     private readonly AppDatabase _db;
 
     public ProjectRepository(AppDatabase db) => _db = db;
 
-    // Saves a brand-new project with its fields and months in one transaction, then stamps the
-    // assigned id back onto the project and returns it.
+    // Saves a brand-new project with its fields in one transaction, then stamps the assigned id back
+    // onto the project and returns it.
     public long Insert(Project project)
     {
         using var connection = _db.Open();
@@ -40,28 +40,16 @@ public sealed class ProjectRepository
         foreach (var field in project.Fields)
             InsertField(connection, transaction, projectId, ordinal++, field);
 
-        // Month labels, in sidebar order (newest first as supplied).
-        ordinal = 0;
-        foreach (var month in project.Months)
-        {
-            using var insertMonth = connection.CreateCommand();
-            insertMonth.Transaction = transaction;
-            insertMonth.CommandText = "INSERT INTO months (project_id, ordinal, label) VALUES ($pid, $ord, $label);";
-            insertMonth.Parameters.AddWithValue("$pid", projectId);
-            insertMonth.Parameters.AddWithValue("$ord", ordinal++);
-            insertMonth.Parameters.AddWithValue("$label", month);
-            insertMonth.ExecuteNonQuery();
-        }
-
         transaction.Commit();
         project.Id = projectId;
         return projectId;
     }
 
-    // Applies a schema edit: updates the project name and replaces its field definitions. The
-    // design dialog does not edit month labels, so the months table is left untouched. Old field
-    // rows are deleted and the current ones re-inserted in order, all in one transaction.
-    // (Once survey responses reference fields, this will need a migration step; today nothing does.)
+    // Applies a schema edit: updates the project name and reconciles its field definitions by id.
+    // Existing fields are updated in place (keeping their fields.id), fields the user removed in the
+    // dialog are deleted (their answers cascade away), and newly added fields are inserted. Because
+    // ids are preserved, imported answers — which reference fields.id — survive a rename / retype /
+    // reorder of a field. All in one transaction.
     public void Update(Project project)
     {
         using var connection = _db.Open();
@@ -78,24 +66,27 @@ public sealed class ProjectRepository
             updateProject.ExecuteNonQuery();
         }
 
-        // Replace the field set: clear the old rows, then re-insert the current ones in order.
-        using (var deleteFields = connection.CreateCommand())
-        {
-            deleteFields.Transaction = transaction;
-            deleteFields.CommandText = "DELETE FROM fields WHERE project_id = $id;";
-            deleteFields.Parameters.AddWithValue("$id", project.Id);
-            deleteFields.ExecuteNonQuery();
-        }
+        // Delete fields no longer in the draft first (before inserting new ones, whose fresh ids must
+        // not be swept away). A field carries id 0 until saved, so the kept set is the positive ids.
+        var keptIds = project.Fields.Where(f => f.Id > 0).Select(f => f.Id).ToHashSet();
+        DeleteFieldsNotIn(connection, transaction, project.Id, keptIds);
 
+        // Upsert each draft field at its on-screen ordinal: update the existing row, or insert a new one.
         var ordinal = 0;
         foreach (var field in project.Fields)
-            InsertField(connection, transaction, project.Id, ordinal++, field);
+        {
+            if (field.Id > 0)
+                UpdateField(connection, transaction, project.Id, ordinal, field);
+            else
+                InsertField(connection, transaction, project.Id, ordinal, field);
+            ordinal++;
+        }
 
         transaction.Commit();
     }
 
-    // Inserts one field row at the given ordinal within an open transaction. Shared by Insert and
-    // Update so the column list and value mapping live in one place.
+    // Inserts one field row at the given ordinal within an open transaction, then stamps the assigned
+    // id back onto the field so callers (and the new answers that reference it) can use it.
     private static void InsertField(SqliteConnection connection, SqliteTransaction transaction, long projectId, int ordinal, DataField field)
     {
         using var insertField = connection.CreateCommand();
@@ -103,10 +94,10 @@ public sealed class ProjectRepository
         insertField.CommandText = """
             INSERT INTO fields
                 (project_id, ordinal, name, field_type, analysis,
-                 use_for_aggregation, use_load_date_as_default, enable_alert, alert_threshold)
+                 use_for_aggregation, use_load_date_as_default)
             VALUES
-                ($pid, $ord, $name, $type, $analysis,
-                 $agg, $loadDate, $alert, $threshold);
+                ($pid, $ord, $name, $type, $analysis, $agg, $loadDate);
+            SELECT last_insert_rowid();
             """;
         insertField.Parameters.AddWithValue("$pid", projectId);
         insertField.Parameters.AddWithValue("$ord", ordinal);
@@ -115,11 +106,55 @@ public sealed class ProjectRepository
         insertField.Parameters.AddWithValue("$analysis", field.Analysis.ToString());
         insertField.Parameters.AddWithValue("$agg", field.UseForAggregation ? 1 : 0);
         insertField.Parameters.AddWithValue("$loadDate", field.UseLoadDateAsDefault ? 1 : 0);
-        // The alert columns are retained in the schema (NOT NULL) for backward compatibility but the
-        // feature was removed; write neutral defaults.
-        insertField.Parameters.AddWithValue("$alert", 1);
-        insertField.Parameters.AddWithValue("$threshold", -0.5);
-        insertField.ExecuteNonQuery();
+        field.Id = (long)insertField.ExecuteScalar()!;
+    }
+
+    // Updates an existing field row in place (matched by id, scoped to the project), at its ordinal.
+    private static void UpdateField(SqliteConnection connection, SqliteTransaction transaction, long projectId, int ordinal, DataField field)
+    {
+        using var updateField = connection.CreateCommand();
+        updateField.Transaction = transaction;
+        updateField.CommandText = """
+            UPDATE fields
+            SET ordinal = $ord, name = $name, field_type = $type, analysis = $analysis,
+                use_for_aggregation = $agg, use_load_date_as_default = $loadDate
+            WHERE id = $id AND project_id = $pid;
+            """;
+        updateField.Parameters.AddWithValue("$ord", ordinal);
+        updateField.Parameters.AddWithValue("$name", field.Name);
+        updateField.Parameters.AddWithValue("$type", field.FieldType.ToString());
+        updateField.Parameters.AddWithValue("$analysis", field.Analysis.ToString());
+        updateField.Parameters.AddWithValue("$agg", field.UseForAggregation ? 1 : 0);
+        updateField.Parameters.AddWithValue("$loadDate", field.UseLoadDateAsDefault ? 1 : 0);
+        updateField.Parameters.AddWithValue("$id", field.Id);
+        updateField.Parameters.AddWithValue("$pid", projectId);
+        updateField.ExecuteNonQuery();
+    }
+
+    // Deletes the project's field rows whose id is not in the kept set (the fields removed in the
+    // dialog). An empty kept set means every existing field was removed. Answers cascade away.
+    private static void DeleteFieldsNotIn(SqliteConnection connection, SqliteTransaction transaction, long projectId, IReadOnlyCollection<long> keptIds)
+    {
+        using var command = connection.CreateCommand();
+        command.Transaction = transaction;
+        command.Parameters.AddWithValue("$pid", projectId);
+        if (keptIds.Count == 0)
+        {
+            command.CommandText = "DELETE FROM fields WHERE project_id = $pid;";
+        }
+        else
+        {
+            var placeholders = new List<string>();
+            var index = 0;
+            foreach (var id in keptIds)
+            {
+                var name = "$k" + index++;
+                placeholders.Add(name);
+                command.Parameters.AddWithValue(name, id);
+            }
+            command.CommandText = $"DELETE FROM fields WHERE project_id = $pid AND id NOT IN ({string.Join(",", placeholders)});";
+        }
+        command.ExecuteNonQuery();
     }
 
     // Lists saved projects for the welcome screen, newest-updated first, each with its field count.
@@ -150,7 +185,7 @@ public sealed class ProjectRepository
         return summaries;
     }
 
-    // Loads the full project — fields and months in their saved order — or null if the id is gone.
+    // Loads the full project — its fields in their saved order — or null if the id is gone.
     public Project? Load(long id)
     {
         using var connection = _db.Open();
@@ -170,8 +205,7 @@ public sealed class ProjectRepository
         using (var loadFields = connection.CreateCommand())
         {
             loadFields.CommandText = """
-                SELECT name, field_type, analysis,
-                       use_for_aggregation, use_load_date_as_default, enable_alert, alert_threshold
+                SELECT id, name, field_type, analysis, use_for_aggregation, use_load_date_as_default
                 FROM fields WHERE project_id = $id ORDER BY ordinal;
                 """;
             loadFields.Parameters.AddWithValue("$id", id);
@@ -180,23 +214,14 @@ public sealed class ProjectRepository
             {
                 project.Fields.Add(new DataField
                 {
-                    Name = reader.GetString(0),
-                    FieldType = FieldTypeInfo.ParseStored(reader.GetString(1)),
-                    Analysis = Enum.Parse<AnalysisMethod>(reader.GetString(2)),
-                    UseForAggregation = reader.GetInt32(3) != 0,
-                    UseLoadDateAsDefault = reader.GetInt32(4) != 0,
-                    // columns 5/6 (enable_alert, alert_threshold) are retained but unused.
+                    Id = reader.GetInt64(0),
+                    Name = reader.GetString(1),
+                    FieldType = FieldTypeInfo.ParseStored(reader.GetString(2)),
+                    Analysis = Enum.Parse<AnalysisMethod>(reader.GetString(3)),
+                    UseForAggregation = reader.GetInt32(4) != 0,
+                    UseLoadDateAsDefault = reader.GetInt32(5) != 0,
                 });
             }
-        }
-
-        using (var loadMonths = connection.CreateCommand())
-        {
-            loadMonths.CommandText = "SELECT label FROM months WHERE project_id = $id ORDER BY ordinal;";
-            loadMonths.Parameters.AddWithValue("$id", id);
-            using var reader = loadMonths.ExecuteReader();
-            while (reader.Read())
-                project.Months.Add(reader.GetString(0));
         }
 
         return project;

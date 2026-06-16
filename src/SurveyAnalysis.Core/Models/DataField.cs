@@ -8,6 +8,10 @@ namespace SurveyAnalysis.Models;
 // as the basis for monthly aggregation. Observable so the designer edits live.
 public partial class DataField : ObservableObject
 {
+    // Database row id (fields.id). 0 until saved. Stable across schema edits so imported answers,
+    // which reference the field by this id, survive a rename / retype / reorder of the field.
+    public long Id { get; set; }
+
     // 項目名
     [ObservableProperty]
     private string _name = "";

@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.ComponentModel;
+using System.Diagnostics;
 using System.Drawing;
 using System.IO;
 using System.Windows.Forms;
@@ -64,6 +65,53 @@ public sealed class MainForm : Form
         SwapContent();
     }
 
+    // ===== Database maintenance (auto-optimize on startup / backup on close) =====
+
+    // On startup, optimize (VACUUM) the database if auto-optimize is on (the default). Quick on a small
+    // file; the busy cursor marks the brief pause. Best-effort — a failure must not block launch.
+    protected override void OnLoad(EventArgs e)
+    {
+        base.OnLoad(e);
+        if (!_shell.CreateSettingsViewModel().AutoOptimizeOnStartup)
+            return;
+        try
+        {
+            Cursor.Current = Cursors.WaitCursor;
+            UseWaitCursor = true;
+            AppServices.Maintenance.Optimize();
+        }
+        catch { /* optimization is best-effort */ }
+        finally { UseWaitCursor = false; Cursor.Current = Cursors.Default; }
+    }
+
+    // プロジェクトを閉じる: back up the database first (the requested trigger), then return to the welcome page.
+    private void OnCloseProject()
+    {
+        BackupDatabase(announceErrors: true);
+        _shell.CloseProjectCommand.Execute(null);
+    }
+
+    // Copies the database to the backups folder per the retention setting, with the busy cursor shown.
+    // A backup failure on an explicit close is surfaced; on app exit it is swallowed (never block exit).
+    private void BackupDatabase(bool announceErrors)
+    {
+        var retention = BackupRetentionPolicy.Parse(_shell.CreateSettingsViewModel().BackupRetention);
+        if (retention == BackupRetention.Off)
+            return;
+        try
+        {
+            Cursor.Current = Cursors.WaitCursor;
+            UseWaitCursor = true;
+            AppServices.Maintenance.Backup(retention, DateTime.Now);
+        }
+        catch (Exception ex) when (announceErrors)
+        {
+            MessageBox.Show(this, "データベースのバックアップに失敗しました。\n" + ex.Message, "バックアップ", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+        }
+        catch { /* on exit: never block shutdown */ }
+        finally { UseWaitCursor = false; Cursor.Current = Cursors.Default; }
+    }
+
     // ===== Window position / size persistence =====
     // Remember the window's normal bounds, maximized state and the screen size at exit, and restore them
     // next launch — but only when the screen is the same size, so a layout that fit one monitor is not
@@ -85,9 +133,49 @@ public sealed class MainForm : Form
             return;
 
         StartPosition = FormStartPosition.Manual;
+
+        // If other instances of this app are already open, cascade this window off the saved position so
+        // it does not land exactly on top of them (instead of re-displaying at the same spot). A duplicate
+        // also skips restoring a maximized state — a cascaded, normal window reads clearly as "another".
+        var duplicates = CountOtherInstances();
+        if (duplicates > 0)
+        {
+            Bounds = CascadeBounds(bounds, duplicates, screen);
+            return;
+        }
+
         Bounds = bounds;
         if (settings.TryGetValue(WindowMaximizedKey, out var maxText) && bool.TryParse(maxText, out var maximized) && maximized)
             WindowState = FormWindowState.Maximized;
+    }
+
+    // The number of other running processes of this app (same executable name).
+    private static int CountOtherInstances()
+    {
+        using var current = Process.GetCurrentProcess();
+        var count = 0;
+        foreach (var process in Process.GetProcessesByName(current.ProcessName))
+        {
+            if (process.Id != current.Id)
+                count++;
+            process.Dispose();
+        }
+        return count;
+    }
+
+    // Offsets the saved bounds down-right by one step per existing instance so stacked windows cascade
+    // instead of overlapping; wraps back toward the top-left if a step would push the window off-screen.
+    private Rectangle CascadeBounds(Rectangle bounds, int instances, Screen screen)
+    {
+        var area = screen.WorkingArea;
+        var step = LogicalToDeviceUnits(28) * instances;
+        var x = bounds.X + step;
+        var y = bounds.Y + step;
+        if (x + bounds.Width > area.Right)
+            x = area.X + LogicalToDeviceUnits(28);
+        if (y + bounds.Height > area.Bottom)
+            y = area.Y + LogicalToDeviceUnits(28);
+        return new Rectangle(x, y, bounds.Width, bounds.Height);
     }
 
     private void SaveWindowState()
@@ -120,6 +208,10 @@ public sealed class MainForm : Form
 
     protected override void OnFormClosing(FormClosingEventArgs e)
     {
+        // Capture the working database on exit too (the requested trigger is closing a project, but quitting
+        // with a project still open should not skip the safety backup). Silent so it never blocks shutdown.
+        if (_shell.IsProjectOpen)
+            BackupDatabase(announceErrors: false);
         SaveWindowState();
         base.OnFormClosing(e);
     }
@@ -185,14 +277,15 @@ public sealed class MainForm : Form
             AddRow(bottom, NavButton(Icons.Add, "インポート (CSV)", () => _shell.ImportCommand.Execute(null)));
             AddRow(bottom, NavButton(Icons.Export, "エクスポート", OnExportNotImplemented));
             AddRow(bottom, Divider());
-            AddRow(bottom, NavButton(Icons.Close, "プロジェクトを閉じる", () => _shell.CloseProjectCommand.Execute(null)));
+            AddRow(bottom, NavButton(Icons.Close, "プロジェクトを閉じる", OnCloseProject));
         }
         AddRow(bottom, NavButton(Icons.Settings, "設定", OnSettings));
 
-        // Main navigation fills the space above the bottom actions.
+        // Main navigation fills the space above the bottom actions. No AutoScroll: the few nav rows always
+        // fit, and the trailing filler row absorbs the slack — AutoScroll only produced a phantom
+        // scrollbar (a TableLayoutPanel with a Percent filler row reports content just over its height).
         var nav = NavStack();
         nav.Dock = DockStyle.Fill;
-        nav.AutoScroll = true;
         nav.Padding = new Padding(0, LogicalToDeviceUnits(14), 0, 0);
 
         var heading = new Label
@@ -381,7 +474,8 @@ public sealed class MainForm : Form
     // 新規プロジェクト作成（モーダル）。確定された下書きを保存して開く。
     private void OnCreateProject()
     {
-        using var form = new ProjectDesignForm(new ProjectDesignViewModel());
+        var vm = new ProjectDesignViewModel { IsNameAvailable = name => _shell.IsProjectNameAvailable(name, 0) };
+        using var form = new ProjectDesignForm(vm);
         if (form.ShowDialog(this) == DialogResult.OK && form.ResultProject is { } project)
             _shell.FinishProjectCreation(project);
     }
@@ -393,8 +487,12 @@ public sealed class MainForm : Form
         // click is acknowledged until the dialog appears. The construction runs synchronously (no message
         // pump), so the wait cursor set here stays up until ShowDialog brings the dialog forward.
         Cursor.Current = Cursors.WaitCursor;
-        using var form = new ProjectDesignForm(new ProjectDesignViewModel(project));
-        if (form.ShowDialog(this) == DialogResult.OK && form.ResultProject is { } edited)
+        var vm = new ProjectDesignViewModel(project) { IsNameAvailable = name => _shell.IsProjectNameAvailable(name, project.Id) };
+        using var form = new ProjectDesignForm(vm);
+        var result = form.ShowDialog(this);
+        if (form.DeleteConfirmed)
+            _shell.DeleteCurrentProject();
+        else if (result == DialogResult.OK && form.ResultProject is { } edited)
             _shell.ApplySchemaEdit(edited);
     }
 
@@ -420,6 +518,7 @@ public sealed class MainForm : Form
                 MessageBoxButtons.OK, MessageBoxIcon.Warning);
             return;
         }
+        vm.IsNameAvailable = name => _shell.IsProjectNameAvailable(name, 0);
 
         using var form = new ProjectDesignForm(vm);
         if (form.ShowDialog(this) == DialogResult.OK && form.ResultProject is { } project && vm.SourceCsv is { } csv)

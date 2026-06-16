@@ -58,6 +58,18 @@ public partial class MainWindowViewModel : ViewModelBase
     // Saved projects for the welcome screen's reopen list.
     public IReadOnlyList<Models.ProjectSummary> GetProjectSummaries() => _projects.ListSummaries();
 
+    // True if no other project (id ≠ exceptId) already uses this name — project names are unique app-wide.
+    // exceptId is the project being renamed (0 when creating a new one). Trims and compares verbatim, to
+    // match the database's UNIQUE index on projects.name.
+    public bool IsProjectNameAvailable(string name, long exceptId)
+    {
+        var trimmed = name.Trim();
+        foreach (var summary in _projects.ListSummaries())
+            if (summary.Id != exceptId && summary.Name == trimmed)
+                return false;
+        return true;
+    }
+
     // Builds a settings view model bound to persistent storage (loads on construct; the dialog
     // host calls Save when it closes).
     public SettingsViewModel CreateSettingsViewModel() => new(_settings);
@@ -68,7 +80,7 @@ public partial class MainWindowViewModel : ViewModelBase
         if (_projects.Load(id) is not { } project)
             return;
         CurrentProject = project;
-        CurrentPage = new DashboardViewModel(project, _responses);
+        CurrentPage = new DashboardViewModel(project, _analytics);
     }
 
     // 新規にプロジェクトを作る → the view shows the modal design dialog.
@@ -85,18 +97,16 @@ public partial class MainWindowViewModel : ViewModelBase
     private void OpenSampleProject()
     {
         CurrentProject = SampleData.CreateSampleProject();
-        CurrentPage = new DashboardViewModel(CurrentProject, _responses);
+        CurrentPage = new DashboardViewModel(CurrentProject, _analytics);
     }
 
     // Called by the design screen when the user confirms the new project: persist it, then open
     // its dashboard.
     public void FinishProjectCreation(Project project)
     {
-        if (project.Months.Count == 0)
-            project.Months.Add("（今月）");
         _projects.Insert(project);
         CurrentProject = project;
-        CurrentPage = new DashboardViewModel(project, _responses);
+        CurrentPage = new DashboardViewModel(project, _analytics);
     }
 
     // Called by the host after the user reviews a CSV-seeded schema and confirms: persist the project,
@@ -104,8 +114,6 @@ public partial class MainWindowViewModel : ViewModelBase
     // star so the slices reflect the new rows immediately, then open the new project's dashboard.
     public void FinishProjectFromCsv(Project project, CsvFile csv, string source)
     {
-        if (project.Months.Count == 0)
-            project.Months.Add("（今月）");
         _projects.Insert(project);
 
         var responses = CsvProjectImport.BuildResponses(project.Fields, csv);
@@ -114,7 +122,7 @@ public partial class MainWindowViewModel : ViewModelBase
         _analytics.Rebuild(project);
 
         CurrentProject = project;
-        CurrentPage = new DashboardViewModel(project, _responses);
+        CurrentPage = new DashboardViewModel(project, _analytics);
     }
 
     // データ項目（開いているプロジェクトのスキーマを確認・変更するモーダル）
@@ -133,7 +141,7 @@ public partial class MainWindowViewModel : ViewModelBase
         if (_projects.Load(draft.Id) is not { } reloaded)
             return;
         CurrentProject = reloaded;
-        CurrentPage = new DashboardViewModel(reloaded, _responses);
+        CurrentPage = new DashboardViewModel(reloaded, _analytics);
     }
 
     // ダッシュボード（選択月の集計）
@@ -141,7 +149,7 @@ public partial class MainWindowViewModel : ViewModelBase
     private void OpenDashboard()
     {
         if (CurrentProject is { } project)
-            CurrentPage = new DashboardViewModel(project, _responses);
+            CurrentPage = new DashboardViewModel(project, _analytics);
     }
 
     // 切り口（時間別 / 地域別 / トピック別）をスタースキーマから集計して表示。
@@ -188,6 +196,16 @@ public partial class MainWindowViewModel : ViewModelBase
     [RelayCommand]
     private void CloseProject()
     {
+        CurrentProject = null;
+        CurrentPage = new WelcomeViewModel(this);
+    }
+
+    // Deletes the open project — its fields, responses and derived star rows cascade away — then returns
+    // to the welcome page. Called by the host after the user confirms deletion in the 構成 dialog.
+    public void DeleteCurrentProject()
+    {
+        if (CurrentProject is { } project)
+            _projects.Delete(project.Id);
         CurrentProject = null;
         CurrentPage = new WelcomeViewModel(this);
     }

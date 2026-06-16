@@ -46,4 +46,42 @@ public class MainWindowViewModelTests
             project.Id, AnalysisGrouping.Time, TimeScope.Root, null, null, System.Array.Empty<AnalysisColumn>());
         Assert.Equal(2, table.Total.Count);
     }
+
+    [Fact]
+    public void IsProjectNameAvailable_enforces_unique_names_except_self()
+    {
+        using var temp = new TempDatabase();
+        var projects = new ProjectRepository(temp.Db);
+        var shell = new MainWindowViewModel(projects, new SettingsRepository(temp.Db), new ResponseRepository(temp.Db), new AnalyticsRepository(temp.Db));
+
+        var existing = new Project { Name = "既存" };
+        projects.Insert(existing);
+
+        Assert.False(shell.IsProjectNameAvailable("既存", 0));        // taken by another project
+        Assert.False(shell.IsProjectNameAvailable("  既存  ", 0));    // trimmed before comparison
+        Assert.True(shell.IsProjectNameAvailable("別名", 0));         // free
+        Assert.True(shell.IsProjectNameAvailable("既存", existing.Id)); // the same project keeping its name
+    }
+
+    [Fact]
+    public void DeleteCurrentProject_removes_it_and_returns_to_welcome()
+    {
+        using var temp = new TempDatabase();
+        var projects = new ProjectRepository(temp.Db);
+        var shell = new MainWindowViewModel(projects, new SettingsRepository(temp.Db), new ResponseRepository(temp.Db), new AnalyticsRepository(temp.Db));
+
+        var project = new Project { Name = "消すプロジェクト" };
+        project.Fields.Add(new DataField { Name = "氏名", FieldType = FieldType.Name });
+        projects.Insert(project);
+        shell.OpenProject(project.Id);
+        Assert.True(shell.IsProjectOpen);
+
+        shell.DeleteCurrentProject();
+
+        // The project is gone from storage and the shell is back on the welcome page.
+        Assert.Null(projects.Load(project.Id));
+        Assert.Empty(projects.ListSummaries());
+        Assert.False(shell.IsProjectOpen);
+        Assert.IsType<WelcomeViewModel>(shell.CurrentPage);
+    }
 }

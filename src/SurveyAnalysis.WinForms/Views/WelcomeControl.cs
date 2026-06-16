@@ -168,13 +168,14 @@ internal sealed class WelcomeControl : UserControl
         openCol.DefaultCellStyle.Alignment = DataGridViewContentAlignment.MiddleCenter;
         grid.Columns.AddRange(nameCol, countCol, dateCol, openCol);
 
-        // Fixed row/header height (DPI-scaled) so the list reliably shows ten rows.
+        // Fixed row/header height (DPI-scaled) so the list reliably shows eight rows.
         var rowHeight = rowFont.Height + LogicalToDeviceUnits(6);
         grid.RowTemplate.Height = rowHeight;
         grid.ColumnHeadersHeight = rowHeight;
 
         foreach (var summary in _vm.RecentProjects)
         {
+            // Project names are unique, so the name alone identifies a project — no path is shown.
             var i = grid.Rows.Add(summary.Name, summary.FieldCount.ToString(), summary.UpdatedUtc.ToLocalTime().ToString("yyyy/MM/dd HH:mm"), null);
             grid.Rows[i].Tag = summary;
         }

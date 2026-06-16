@@ -1,4 +1,3 @@
-using System;
 using System.Collections.Generic;
 using System.Globalization;
 using System.Linq;
@@ -84,21 +83,12 @@ public static class CsvProjectImport
     {
         if (values.Count == 0)
             return FieldType.FreeText;
-        if (values.All(IsDate))
+        if (values.All(DateParsing.IsDate))
             return FieldType.Date;
         if (values.All(IsNumber))
             return FieldType.Number;
         return FieldType.FreeText;
     }
-
-    // Date formats accepted in addition to the invariant parse, matching the analytics ETL so a column
-    // guessed as 日付 here is one the star schema can actually date.
-    private static readonly string[] DateFormats =
-        { "yyyy/MM/dd", "yyyy-MM-dd", "yyyy/M/d", "yyyy-M-d", "yyyy年M月d日" };
-
-    private static bool IsDate(string value) =>
-        DateTime.TryParse(value, CultureInfo.InvariantCulture, DateTimeStyles.None, out _)
-        || DateTime.TryParseExact(value, DateFormats, CultureInfo.InvariantCulture, DateTimeStyles.None, out _);
 
     private static bool IsNumber(string value) =>
         double.TryParse(value, NumberStyles.Any, CultureInfo.InvariantCulture, out _);

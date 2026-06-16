@@ -7,7 +7,7 @@ namespace SurveyAnalysis.Tests;
 public class ProjectRepositoryTests
 {
     [Fact]
-    public void Insert_then_Load_round_trips_fields_and_months_in_order()
+    public void Insert_then_Load_round_trips_fields_in_order()
     {
         using var temp = new TempDatabase();
         var repo = new ProjectRepository(temp.Db);
@@ -16,8 +16,6 @@ public class ProjectRepositoryTests
         project.Fields.Add(new DataField { Name = "氏名", FieldType = FieldType.Name, Analysis = AnalysisMethod.None });
         project.Fields.Add(new DataField { Name = "記入日", FieldType = FieldType.Date, Analysis = AnalysisMethod.None, UseForAggregation = true });
         project.Fields.Add(new DataField { Name = "ご意見・ご要望", FieldType = FieldType.FreeText, Analysis = AnalysisMethod.Sentiment });
-        project.Months.Add("2026年5月");
-        project.Months.Add("2026年4月");
 
         var id = repo.Insert(project);
 
@@ -40,8 +38,18 @@ public class ProjectRepositoryTests
 
         var sentiment = loaded.Fields[2];
         Assert.Equal(AnalysisMethod.Sentiment, sentiment.Analysis);
+    }
 
-        Assert.Equal(new[] { "2026年5月", "2026年4月" }, loaded.Months);
+    [Fact]
+    public void Insert_rejects_a_duplicate_project_name()
+    {
+        using var temp = new TempDatabase();
+        var repo = new ProjectRepository(temp.Db);
+
+        repo.Insert(new Project { Name = "同名プロジェクト" });
+
+        // The projects.name unique index (v3) is the integrity backstop behind the dialog's pre-check.
+        Assert.Throws<Microsoft.Data.Sqlite.SqliteException>(() => repo.Insert(new Project { Name = "同名プロジェクト" }));
     }
 
     [Fact]
@@ -94,7 +102,7 @@ public class ProjectRepositoryTests
     }
 
     [Fact]
-    public void Update_replaces_fields_and_name_but_keeps_months()
+    public void Update_replaces_fields_and_name()
     {
         using var temp = new TempDatabase();
         var repo = new ProjectRepository(temp.Db);
@@ -102,8 +110,6 @@ public class ProjectRepositoryTests
         var original = new Project { Name = "元の名前" };
         original.Fields.Add(new DataField { Name = "氏名", FieldType = FieldType.Name });
         original.Fields.Add(new DataField { Name = "記入日", FieldType = FieldType.Date, UseForAggregation = true });
-        original.Months.Add("2026年5月");
-        original.Months.Add("2026年4月");
         var id = repo.Insert(original);
 
         // Edited draft: rename, drop 記入日, add a sentiment field — carrying the existing id.
@@ -121,8 +127,5 @@ public class ProjectRepositoryTests
         Assert.Equal("氏名", loaded.Fields[0].Name);
         Assert.Equal("ご意見", loaded.Fields[1].Name);
         Assert.Equal(AnalysisMethod.Sentiment, loaded.Fields[1].Analysis);
-
-        // Months are not touched by a schema edit.
-        Assert.Equal(new[] { "2026年5月", "2026年4月" }, loaded.Months);
     }
 }

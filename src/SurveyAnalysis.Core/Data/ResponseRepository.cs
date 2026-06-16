@@ -1,13 +1,16 @@
 using System;
 using System.Collections.Generic;
+using Microsoft.Data.Sqlite;
 using SurveyAnalysis.Models;
 
 namespace SurveyAnalysis.Data;
 
-// Reads and writes imported survey responses and their answers. Answers link to project fields by
-// name (field_name), not by fields.id, so that a later schema edit — which deletes and reinserts
-// the field rows — does not cascade-delete the responses. Responses still belong to a project, so
-// deleting the project removes them.
+// Reads and writes imported survey responses and their answers. Answers reference their project field
+// by id (answers.field_id): the field id is stable across schema edits (ProjectRepository.Update
+// updates fields in place), so a rename / retype / reorder of a field does not break the link, while
+// removing a field cascade-deletes its answers. Responses belong to a project, so deleting the project
+// removes them too. Imported answers arrive keyed by field name (the CSV mapping) and are resolved to
+// the field id on insert.
 public sealed class ResponseRepository
 {
     private readonly AppDatabase _db;
@@ -20,6 +23,9 @@ public sealed class ResponseRepository
         using var connection = _db.Open();
         using var transaction = connection.BeginTransaction();
         var now = DateTime.UtcNow.ToString("o");
+
+        // Map the project's field names to their ids once; answers carry the name and resolve through it.
+        var fieldIdByName = LoadFieldIds(connection, transaction, projectId);
 
         foreach (var response in responses)
         {
@@ -39,11 +45,14 @@ public sealed class ResponseRepository
 
             foreach (var answer in response.Answers)
             {
+                // An answer for a name with no matching project field is skipped (e.g. a dropped field).
+                if (!fieldIdByName.TryGetValue(answer.FieldName, out var fieldId))
+                    continue;
                 using var insertAnswer = connection.CreateCommand();
                 insertAnswer.Transaction = transaction;
-                insertAnswer.CommandText = "INSERT INTO answers (response_id, field_name, value) VALUES ($rid, $field, $value);";
+                insertAnswer.CommandText = "INSERT INTO answers (response_id, field_id, value) VALUES ($rid, $fid, $value);";
                 insertAnswer.Parameters.AddWithValue("$rid", responseId);
-                insertAnswer.Parameters.AddWithValue("$field", answer.FieldName);
+                insertAnswer.Parameters.AddWithValue("$fid", fieldId);
                 insertAnswer.Parameters.AddWithValue("$value", answer.Value);
                 insertAnswer.ExecuteNonQuery();
             }
@@ -52,16 +61,32 @@ public sealed class ResponseRepository
         transaction.Commit();
     }
 
-    // Loads every response for a project as a field-name→value map (newest first). Multiple answers
-    // for the same field keep the last value. Used by the dashboard to aggregate real data.
+    // The project's field name → id map (last wins if names collide). Used to resolve imported answers.
+    private static Dictionary<string, long> LoadFieldIds(SqliteConnection connection, SqliteTransaction transaction, long projectId)
+    {
+        using var command = connection.CreateCommand();
+        command.Transaction = transaction;
+        command.CommandText = "SELECT name, id FROM fields WHERE project_id = $pid;";
+        command.Parameters.AddWithValue("$pid", projectId);
+        var map = new Dictionary<string, long>();
+        using var reader = command.ExecuteReader();
+        while (reader.Read())
+            map[reader.GetString(0)] = reader.GetInt64(1);
+        return map;
+    }
+
+    // Loads every response for a project as a field-name→value map (newest first), the name resolved
+    // through fields so a renamed field reads under its current name. Multiple answers for the same
+    // field keep the last value. Used by the dashboard to aggregate real data.
     public IReadOnlyList<IReadOnlyDictionary<string, string>> LoadForProject(long projectId)
     {
         using var connection = _db.Open();
         using var command = connection.CreateCommand();
         command.CommandText = """
-            SELECT r.id, a.field_name, a.value
+            SELECT r.id, fl.name, a.value
             FROM responses r
             LEFT JOIN answers a ON a.response_id = r.id
+            LEFT JOIN fields fl ON fl.id = a.field_id
             WHERE r.project_id = $pid
             ORDER BY r.id DESC;
             """;

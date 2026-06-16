@@ -2,9 +2,9 @@ using System;
 
 namespace SurveyAnalysis.Models;
 
-// The dashboard's 対象期間 selection. A preset is a window ending today (当日/昨日/直近N日); Custom is a
-// user-picked [from, to] range chosen on the calendar. The slices keep their own AggregationPeriod —
-// this set (with カスタム期間) is the dashboard's Google-Analytics-style picker.
+// The 対象期間 selection shared by the dashboard and every 切り口. A preset is a window ending today
+// (当日/昨日/直近N日); Custom is a user-picked [from, to] range chosen on the calendar. This set (with
+// カスタム期間) is the Google-Analytics-style picker — the single 対象期間 model across the app.
 public enum DateRangePreset
 {
     Today,

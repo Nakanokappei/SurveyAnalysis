@@ -19,9 +19,6 @@ public static class SampleData
         project.Fields.Add(new DataField { Name = "ご意見・ご要望", FieldType = FieldType.FreeText, Analysis = AnalysisMethod.Sentiment });
         project.Fields.Add(new DataField { Name = "連絡先電話番号", FieldType = FieldType.Phone, Analysis = AnalysisMethod.None });
 
-        foreach (var month in new[] { "2026年5月", "2026年4月", "2026年3月", "2026年2月", "2026年1月", "2025年12月" })
-            project.Months.Add(month);
-
         return project;
     }
 

@@ -30,6 +30,9 @@ internal sealed class ProjectDesignForm : Form
     // The confirmed project, or null if cancelled / closed.
     public Project? ResultProject { get; private set; }
 
+    // True when the user confirmed deleting the project (edit mode); the host then removes it.
+    public bool DeleteConfirmed { get; private set; }
+
     public ProjectDesignForm(ProjectDesignViewModel vm)
     {
         AutoScaleDimensions = new SizeF(96F, 96F);
@@ -51,12 +54,13 @@ internal sealed class ProjectDesignForm : Form
         _confirm.Text = _vm.ConfirmLabel;
         _projectName.TextChanged += (_, _) => _vm.ProjectName = _projectName.Text;
         _addField.Click += (_, _) => _vm.AddFieldCommand.Execute(null);
-        _confirm.Click += (_, _) => _vm.CreateProjectCommand.Execute(null);
+        _confirm.Click += (_, _) => OnConfirm();
 
         _vm.Fields.CollectionChanged += OnFieldsChanged;
         _vm.CreateProjectCommand.CanExecuteChanged += (_, _) => UpdateConfirmEnabled();
         _vm.Completed += OnCompleted;
         _vm.Cancelled += OnCancelled;
+        _vm.DeleteRequested += OnDeleteRequested;
 
         RebuildFields();
         UpdateConfirmEnabled();
@@ -69,6 +73,7 @@ internal sealed class ProjectDesignForm : Form
             _vm.Fields.CollectionChanged -= OnFieldsChanged;
             _vm.Completed -= OnCompleted;
             _vm.Cancelled -= OnCancelled;
+            _vm.DeleteRequested -= OnDeleteRequested;
         }
         base.Dispose(disposing);
     }
@@ -103,19 +108,31 @@ internal sealed class ProjectDesignForm : Form
         _content.Padding = new Padding(28, 4, 28, 8);
         _content.Controls.Add(rows);
 
-        // Bottom action bar: a spacer column pushes キャンセル / 確定 to the right, vertically centred.
-        var bar = new TableLayoutPanel { Dock = DockStyle.Bottom, ColumnCount = 3, RowCount = 1, AutoSize = true, AutoSizeMode = AutoSizeMode.GrowAndShrink, BackColor = ColorTranslator.FromHtml("#F8FAFC"), Padding = new Padding(28, 10, 28, 10) };
-        bar.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
-        bar.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
-        bar.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
+        // Bottom action bar: an optional delete button at the left (edit mode only), then a spacer column
+        // that pushes キャンセル / 確定 to the right, all vertically centred.
+        var bar = new TableLayoutPanel { Dock = DockStyle.Bottom, ColumnCount = 4, RowCount = 1, AutoSize = true, AutoSizeMode = AutoSizeMode.GrowAndShrink, BackColor = ColorTranslator.FromHtml("#F8FAFC"), Padding = new Padding(28, 10, 28, 10) };
+        bar.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));     // delete (edit mode only; empty otherwise)
+        bar.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100)); // spacer
+        bar.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));     // cancel
+        bar.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));     // confirm
         bar.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+
+        // Delete is destructive and only meaningful for a saved project, so it shows in edit mode only,
+        // set apart on the left in red. It confirms before signalling the host to delete.
+        if (_vm.IsEditing)
+        {
+            var delete = new Button { Text = "このプロジェクトを削除する", AutoSize = true, FlatStyle = FlatStyle.Flat, BackColor = Theme.Danger, ForeColor = Color.White, Font = Theme.Font(10f), Cursor = Cursors.Hand, Anchor = AnchorStyles.None, Padding = new Padding(14, 6, 14, 6) };
+            delete.FlatAppearance.BorderSize = 0;
+            delete.Click += (_, _) => ConfirmAndDelete();
+            bar.Controls.Add(delete, 0, 0);
+        }
 
         var cancel = new Button { Text = "キャンセル", AutoSize = true, FlatStyle = FlatStyle.Flat, BackColor = ColorTranslator.FromHtml("#F8FAFC"), ForeColor = Theme.BodyText, Font = Theme.Font(10f), Cursor = Cursors.Hand, Anchor = AnchorStyles.None, Padding = new Padding(12, 6, 12, 6) };
         cancel.FlatAppearance.BorderSize = 0;
         cancel.Click += (_, _) => _vm.CancelCommand.Execute(null);
         _confirm.FlatAppearance.BorderSize = 0;
-        bar.Controls.Add(cancel, 1, 0);
-        bar.Controls.Add(_confirm, 2, 0);
+        bar.Controls.Add(cancel, 2, 0);
+        bar.Controls.Add(_confirm, 3, 0);
 
         // Fill added first so it yields its edges to the docked top area and action bar.
         Controls.Add(_content);
@@ -246,6 +263,21 @@ internal sealed class ProjectDesignForm : Form
 
     private void UpdateConfirmEnabled() => _confirm.Enabled = _vm.CreateProjectCommand.CanExecute(null);
 
+    // On confirm, reject a duplicate project name (names are unique app-wide) before saving, keeping the
+    // dialog open so the entered schema is not lost. Otherwise proceed with the create / save command.
+    private void OnConfirm()
+    {
+        var name = _vm.ProjectName.Trim();
+        if (_vm.IsNameAvailable is { } available && !available(name))
+        {
+            MessageBox.Show(this,
+                $"「{name}」という名前のプロジェクトは既にあります。\n別の名前を入力してください。",
+                "プロジェクト名の重複", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+            return;
+        }
+        _vm.CreateProjectCommand.Execute(null);
+    }
+
     private void OnCompleted(Project project)
     {
         ResultProject = project;
@@ -256,6 +288,24 @@ internal sealed class ProjectDesignForm : Form
     private void OnCancelled()
     {
         DialogResult = DialogResult.Cancel;
+        Close();
+    }
+
+    // Confirms (defaulting to "No"), then asks the view model to delete. Spells out that the project's
+    // data items and imported responses go with it and that it cannot be undone.
+    private void ConfirmAndDelete()
+    {
+        var answer = MessageBox.Show(this,
+            $"プロジェクト「{_vm.ProjectName}」を削除します。\nデータ項目と取り込んだ回答もすべて削除され、元に戻せません。\n\n削除してよろしいですか？",
+            "プロジェクトの削除", MessageBoxButtons.YesNo, MessageBoxIcon.Warning, MessageBoxDefaultButton.Button2);
+        if (answer == DialogResult.Yes)
+            _vm.DeleteProjectCommand.Execute(null);
+    }
+
+    private void OnDeleteRequested()
+    {
+        DeleteConfirmed = true;
+        DialogResult = DialogResult.OK;
         Close();
     }
 }

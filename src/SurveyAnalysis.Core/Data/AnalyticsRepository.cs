@@ -34,12 +34,19 @@ public sealed class AnalyticsRepository
     // ===== ETL =====
 
     // Rebuilds a project's facts from its raw responses. Idempotent: the project's existing facts
-    // are cleared first, so calling it again after an import simply refreshes the star.
+    // are cleared first (the choice bridge cascades), so calling it again after an import simply
+    // refreshes the star.
     public void Rebuild(Project project)
     {
         var dateField = DateField(project);
         var regionField = RegionField(project);
-        // Topic is left NULL until LLM topic assignment writes it; the raw field value is not a topic.
+        // The 選択肢 fields each become a value in dim_choice, linked through the fact_response_choice
+        // bridge. Resolved by name from the answer maps, keyed in the dimension by their stable id.
+        var choiceFields = project.Fields
+            .Where(f => f.FieldType == FieldType.Choice && f.Id > 0)
+            .Select(f => (f.Id, f.Name))
+            .ToList();
+        // Main topic / sentiment are left NULL until LLM analysis writes them; the raw value is not one.
 
         using var connection = _db.Open();
         using var transaction = connection.BeginTransaction();
@@ -55,14 +62,25 @@ public sealed class AnalyticsRepository
         foreach (var (responseId, values) in ReadResponses(connection, transaction, project.Id))
         {
             long? dateKey = null;
-            if (dateField is not null && values.TryGetValue(dateField, out var dateValue) && TryParseDate(dateValue, out var date))
+            if (dateField is not null && values.TryGetValue(dateField, out var dateValue) && DateParsing.TryParse(dateValue, out var date))
                 dateKey = GetOrCreateDate(connection, transaction, date);
 
             long? regionKey = null;
             if (regionField is not null && values.TryGetValue(regionField, out var regionValue) && !string.IsNullOrWhiteSpace(regionValue))
                 regionKey = GetOrCreateRegion(connection, transaction, regionValue.Trim());
 
-            InsertFact(connection, transaction, responseId, project.Id, dateKey, regionKey);
+            var factId = InsertFact(connection, transaction, responseId, project.Id, dateKey, regionKey);
+
+            // Link each answered choice option to the fact through the bridge. A multi-select cell
+            // ("A; B; C") is split into one bridge row per option, so each option is its own dimension
+            // member (and a response can fall into several 選択肢別 buckets).
+            foreach (var (fieldId, fieldName) in choiceFields)
+                if (values.TryGetValue(fieldName, out var choiceValue))
+                    foreach (var option in ChoiceValues.Split(choiceValue))
+                    {
+                        var choiceKey = GetOrCreateChoice(connection, transaction, fieldId, option);
+                        InsertFactChoice(connection, transaction, factId, choiceKey);
+                    }
         }
 
         transaction.Commit();
@@ -73,20 +91,22 @@ public sealed class AnalyticsRepository
     // The individual responses within a scope (the terminal 個票一覧), each as a field-name→value map
     // so the view model can build a display row (記入日 + 抜粋, PII hidden) the same way the dashboard
     // does. Filtered through the date dimension so only dated responses in the scope are returned.
-    public IReadOnlyList<IReadOnlyDictionary<string, string>> ResponsesForScope(long projectId, TimeScope scope, long? fromKey = null, long? toKey = null)
+    public IReadOnlyList<IReadOnlyDictionary<string, string>> ResponsesForScope(long projectId, TimeScope scope, long? fromKey = null, long? toKey = null, bool newestFirst = false)
     {
         using var connection = _db.Open();
         using var command = connection.CreateCommand();
         command.Parameters.AddWithValue("$pid", projectId);
         var where = ScopeWhere(scope, fromKey, toKey, command);
+        var order = newestFirst ? "DESC" : "ASC";
         command.CommandText = $"""
-            SELECT r.id, a.field_name, a.value
+            SELECT r.id, fl.name, a.value
             FROM fact_response f
             JOIN dim_date d ON f.date_key = d.date_key
             JOIN responses r ON r.id = f.response_id
             LEFT JOIN answers a ON a.response_id = r.id
+            LEFT JOIN fields fl ON fl.id = a.field_id
             WHERE {where}
-            ORDER BY r.id;
+            ORDER BY r.id {order};
             """;
         return ReadResponseMaps(command);
     }
@@ -107,11 +127,12 @@ public sealed class AnalyticsRepository
             command.Parameters.AddWithValue("$to", tk);
         }
         command.CommandText = $"""
-            SELECT r.id, a.field_name, a.value
+            SELECT r.id, fl.name, a.value
             FROM fact_response f
             JOIN dim_date d ON f.date_key = d.date_key
             JOIN responses r ON r.id = f.response_id
             LEFT JOIN answers a ON a.response_id = r.id
+            LEFT JOIN fields fl ON fl.id = a.field_id
             WHERE f.project_id = $pid AND d.day_of_week = $dow{window}
             ORDER BY r.id;
             """;
@@ -144,19 +165,25 @@ public sealed class AnalyticsRepository
 
     // Groups responses by the chosen dimension within the scope/window, and for every project field
     // produces one formatted cell using that field's aggregation (種類数 / 合計 / 平均 / 感情平均). For the
-    // time dimension each row also carries the scope to drill into. Aggregation is done in memory over
-    // the joined answer rows — the data is small and this keeps the per-field logic in one place.
+    // time dimension each row also carries the scope to drill into. Choice grouping needs the id of the
+    // 選択肢 field to group by. Aggregation is done in memory over the joined answer rows — the data is
+    // small and this keeps the per-field logic in one place.
     public AnalysisTable AggregateRows(
         long projectId, AnalysisGrouping grouping, TimeScope scope,
-        long? fromKey, long? toKey, IReadOnlyList<AnalysisColumn> columns)
+        long? fromKey, long? toKey, IReadOnlyList<AnalysisColumn> columns, long? choiceFieldId = null)
     {
         using var connection = _db.Open();
         using var command = connection.CreateCommand();
         command.Parameters.AddWithValue("$pid", projectId);
         var where = ScopeWhere(scope, fromKey, toKey, command);
+        if (grouping == AnalysisGrouping.Choice)
+            command.Parameters.AddWithValue("$cf", choiceFieldId ?? 0);
 
-        // Time and 曜日 read from the date dimension; 地域/トピック join their own dimension. The answer
-        // tail (rid / sentiment / field / value) is identical, so the in-memory aggregator is shared.
+        // Time and 曜日 read from the date dimension; 地域/トピック/選択肢 join their own dimension. The
+        // answer tail (rid / sentiment / field / value) is identical, so the in-memory aggregator is
+        // shared. 地域 groups by 都道府県 (the dimension's parsed top level); 選択肢 pulls just the target
+        // field's value from the choice bridge (one value per response) so other choice fields do not
+        // split the response into a phantom （未選択） group.
         command.CommandText = grouping switch
         {
             AnalysisGrouping.Time or AnalysisGrouping.Weekday => $"""
@@ -165,29 +192,47 @@ public sealed class AnalyticsRepository
                        d.week_year AS wy, d.week_of_year AS wo, d.week_label AS wlabel,
                        d.date_key AS dkey, d.full_date AS fdate,
                        d.day_of_week AS dow, d.day_of_week_label AS dowlabel,
-                       r.id AS rid, f.sentiment_score AS sscore, a.field_name AS fname, a.value AS val
+                       r.id AS rid, f.sentiment_score AS sscore, fl.name AS fname, a.value AS val
                 FROM fact_response f
                 JOIN dim_date d ON f.date_key = d.date_key
                 JOIN responses r ON r.id = f.response_id
                 LEFT JOIN answers a ON a.response_id = r.id
+                LEFT JOIN fields fl ON fl.id = a.field_id
                 WHERE {where};
                 """,
             AnalysisGrouping.Region => $"""
-                SELECT COALESCE(g.label, '（未設定）') AS glabel,
-                       r.id AS rid, f.sentiment_score AS sscore, a.field_name AS fname, a.value AS val
+                SELECT COALESCE(g.prefecture, '（未設定）') AS glabel,
+                       r.id AS rid, f.sentiment_score AS sscore, fl.name AS fname, a.value AS val
                 FROM fact_response f
                 LEFT JOIN dim_region g ON f.region_key = g.region_key
                 JOIN responses r ON r.id = f.response_id
                 LEFT JOIN answers a ON a.response_id = r.id
+                LEFT JOIN fields fl ON fl.id = a.field_id
+                WHERE {where};
+                """,
+            AnalysisGrouping.Choice => $"""
+                SELECT COALESCE(c.value, '（未選択）') AS glabel,
+                       r.id AS rid, f.sentiment_score AS sscore, fl.name AS fname, a.value AS val
+                FROM fact_response f
+                LEFT JOIN (
+                    SELECT frc.fact_id, dc.value
+                    FROM fact_response_choice frc
+                    JOIN dim_choice dc ON dc.choice_key = frc.choice_key
+                    WHERE dc.field_id = $cf
+                ) c ON c.fact_id = f.fact_id
+                JOIN responses r ON r.id = f.response_id
+                LEFT JOIN answers a ON a.response_id = r.id
+                LEFT JOIN fields fl ON fl.id = a.field_id
                 WHERE {where};
                 """,
             _ => $"""
                 SELECT COALESCE(t.label, '（未分析）') AS glabel,
-                       r.id AS rid, f.sentiment_score AS sscore, a.field_name AS fname, a.value AS val
+                       r.id AS rid, f.sentiment_score AS sscore, fl.name AS fname, a.value AS val
                 FROM fact_response f
-                LEFT JOIN dim_topic t ON f.topic_key = t.topic_key
+                LEFT JOIN dim_topic t ON f.main_topic_key = t.topic_key
                 JOIN responses r ON r.id = f.response_id
                 LEFT JOIN answers a ON a.response_id = r.id
+                LEFT JOIN fields fl ON fl.id = a.field_id
                 WHERE {where};
                 """,
         };
@@ -218,10 +263,10 @@ public sealed class AnalyticsRepository
             }
         }
 
-        // Largest-first for 地域/トピック; the time/weekday sort keys order chronologically / Mon→Sun.
+        // Largest-first for 地域/トピック/選択肢; the time/weekday sort keys order chronologically / Mon→Sun.
         IEnumerable<Group> ordered = grouping switch
         {
-            AnalysisGrouping.Region or AnalysisGrouping.Topic => groups.Values.OrderByDescending(g => g.Sentiment.Count),
+            AnalysisGrouping.Region or AnalysisGrouping.Topic or AnalysisGrouping.Choice => groups.Values.OrderByDescending(g => g.Sentiment.Count),
             AnalysisGrouping.Weekday => groups.Values.OrderBy(g => g.SortKey),
             _ => groups.Values.OrderByDescending(g => g.SortKey),
         };
@@ -246,7 +291,7 @@ public sealed class AnalyticsRepository
             var dow = reader.GetInt32(reader.GetOrdinal("dow"));
             return (dow.ToString(), reader.GetString(reader.GetOrdinal("dowlabel")), null, dow);
         }
-        if (grouping is AnalysisGrouping.Region or AnalysisGrouping.Topic)
+        if (grouping is AnalysisGrouping.Region or AnalysisGrouping.Topic or AnalysisGrouping.Choice)
         {
             var label = reader.GetString(reader.GetOrdinal("glabel"));
             return (label, label, null, 0);
@@ -369,9 +414,10 @@ public sealed class AnalyticsRepository
         using var command = connection.CreateCommand();
         command.Transaction = transaction;
         command.CommandText = """
-            SELECT r.id, a.field_name, a.value
+            SELECT r.id, fl.name, a.value
             FROM responses r
             LEFT JOIN answers a ON a.response_id = r.id
+            LEFT JOIN fields fl ON fl.id = a.field_id
             WHERE r.project_id = $pid
             ORDER BY r.id;
             """;
@@ -446,44 +492,66 @@ public sealed class AnalyticsRepository
         return key;
     }
 
-    // dim_region is keyed by a surrogate id, deduped by its (unique) label.
+    // dim_region is keyed by a surrogate id, deduped by its (unique) full-address label. The 都道府県 /
+    // 市区町村 split is parsed once and stored so region queries can group by either level.
     private static long GetOrCreateRegion(SqliteConnection connection, SqliteTransaction transaction, string label)
+    {
+        var (prefecture, city) = AddressParser.Parse(label);
+        using var insert = connection.CreateCommand();
+        insert.Transaction = transaction;
+        insert.CommandText = """
+            INSERT OR IGNORE INTO dim_region (label, prefecture, city) VALUES ($label, $pref, $city);
+            SELECT region_key FROM dim_region WHERE label = $label;
+            """;
+        insert.Parameters.AddWithValue("$label", label);
+        insert.Parameters.AddWithValue("$pref", prefecture);
+        insert.Parameters.AddWithValue("$city", city);
+        return (long)insert.ExecuteScalar()!;
+    }
+
+    // dim_choice is keyed by a surrogate id, deduped by (field_id, value) so the same text under two
+    // different choice fields stays distinct.
+    private static long GetOrCreateChoice(SqliteConnection connection, SqliteTransaction transaction, long fieldId, string value)
     {
         using var insert = connection.CreateCommand();
         insert.Transaction = transaction;
         insert.CommandText = """
-            INSERT OR IGNORE INTO dim_region (label) VALUES ($label);
-            SELECT region_key FROM dim_region WHERE label = $label;
+            INSERT OR IGNORE INTO dim_choice (field_id, value) VALUES ($fid, $value);
+            SELECT choice_key FROM dim_choice WHERE field_id = $fid AND value = $value;
             """;
-        insert.Parameters.AddWithValue("$label", label);
+        insert.Parameters.AddWithValue("$fid", fieldId);
+        insert.Parameters.AddWithValue("$value", value);
         return (long)insert.ExecuteScalar()!;
     }
 
-    private static void InsertFact(SqliteConnection connection, SqliteTransaction transaction,
+    // Inserts one fact and returns its id (needed to link its choice answers through the bridge). Main
+    // topic / sentiment are NULL until LLM analysis fills them.
+    private static long InsertFact(SqliteConnection connection, SqliteTransaction transaction,
         long responseId, long projectId, long? dateKey, long? regionKey)
     {
         using var command = connection.CreateCommand();
         command.Transaction = transaction;
         command.CommandText = """
-            INSERT INTO fact_response (response_id, project_id, date_key, region_key, topic_key, sentiment_score, is_negative)
+            INSERT INTO fact_response (response_id, project_id, date_key, region_key, main_topic_key, sentiment_score, is_negative)
             VALUES ($rid, $pid, $date, $region, NULL, NULL, NULL);
+            SELECT last_insert_rowid();
             """;
         command.Parameters.AddWithValue("$rid", responseId);
         command.Parameters.AddWithValue("$pid", projectId);
         command.Parameters.AddWithValue("$date", (object?)dateKey ?? DBNull.Value);
         command.Parameters.AddWithValue("$region", (object?)regionKey ?? DBNull.Value);
+        return (long)command.ExecuteScalar()!;
+    }
+
+    // Links a choice value to a fact (idempotent on the (fact, choice) pair).
+    private static void InsertFactChoice(SqliteConnection connection, SqliteTransaction transaction, long factId, long choiceKey)
+    {
+        using var command = connection.CreateCommand();
+        command.Transaction = transaction;
+        command.CommandText = "INSERT OR IGNORE INTO fact_response_choice (fact_id, choice_key) VALUES ($fid, $ckey);";
+        command.Parameters.AddWithValue("$fid", factId);
+        command.Parameters.AddWithValue("$ckey", choiceKey);
         command.ExecuteNonQuery();
     }
 
-    private static readonly string[] DateFormats =
-        { "yyyy/MM/dd", "yyyy-MM-dd", "yyyy/M/d", "yyyy-M-d", "yyyy年M月d日" };
-
-    private static bool TryParseDate(string? value, out DateTime date)
-    {
-        date = default;
-        if (string.IsNullOrWhiteSpace(value))
-            return false;
-        return DateTime.TryParse(value, CultureInfo.InvariantCulture, DateTimeStyles.None, out date)
-            || DateTime.TryParseExact(value.Trim(), DateFormats, CultureInfo.InvariantCulture, DateTimeStyles.None, out date);
-    }
 }

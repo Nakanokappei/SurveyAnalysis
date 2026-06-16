@@ -22,6 +22,15 @@ public partial class ProjectDesignViewModel : ViewModelBase
     // Raised when the user cancels; the host closes the dialog with no result.
     public event Action? Cancelled;
 
+    // Raised when the user confirms deleting the existing project being edited; the host deletes it and
+    // returns to the welcome screen. Only ever fired in edit mode (the delete action is edit-only).
+    public event Action? DeleteRequested;
+
+    // Returns true if the given (trimmed) name is free to use — set by the host to the shell's uniqueness
+    // check, which excludes the project being edited. Null when no check is wired (design-time / tests),
+    // in which case any name is accepted. The host confirms against it before the dialog closes.
+    public Func<string, bool>? IsNameAvailable { get; set; }
+
     [ObservableProperty]
     private string _projectName = "新しいプロジェクト";
 
@@ -155,27 +164,18 @@ public partial class ProjectDesignViewModel : ViewModelBase
         HasTestResult = true;
     }
 
-    // 確定（新規作成または変更保存）。必須欄が埋まっているときだけ実行可能。編集時は既存IDと月ラベルを
-    // 引き継いだ下書きを返し、ホストが保存して開き直す。
+    // 確定（新規作成または変更保存）。必須欄が埋まっているときだけ実行可能。編集時は既存IDを引き継いだ
+    // 下書きを返し、ホストが保存して開き直す。
     [RelayCommand(CanExecute = nameof(CanCreate))]
     private void CreateProject()
     {
         var project = new Project
         {
             Id = _editingProject?.Id ?? 0,
-            Name = string.IsNullOrWhiteSpace(ProjectName) ? "新しいプロジェクト" : ProjectName,
+            Name = string.IsNullOrWhiteSpace(ProjectName) ? "新しいプロジェクト" : ProjectName.Trim(),
         };
         foreach (var field in Fields)
             project.Fields.Add(field);
-
-        if (_editingProject is { } existing)
-            // 月ラベルはこのダイアログでは編集しないので、そのまま引き継ぐ。
-            foreach (var month in existing.Months)
-                project.Months.Add(month);
-        else
-            // 新規プロジェクトはプロトタイプのダッシュボード用に仮の月を入れる。
-            foreach (var month in new[] { "2026年5月", "2026年4月", "2026年3月" })
-                project.Months.Add(month);
 
         Completed?.Invoke(project);
     }
@@ -183,6 +183,11 @@ public partial class ProjectDesignViewModel : ViewModelBase
     // キャンセルして閉じる
     [RelayCommand]
     private void Cancel() => Cancelled?.Invoke();
+
+    // プロジェクトを削除（編集中の既存プロジェクトのみ）。破壊的操作なので、ホスト側で確認ダイアログを
+    // 出してから実行する。
+    [RelayCommand]
+    private void DeleteProject() => DeleteRequested?.Invoke();
 
     // Produces a placeholder analysis result per analysis method (none / topic / sentiment).
     private static string SampleAnalysisResult(AnalysisMethod method) => method switch
@@ -207,6 +212,9 @@ public partial class ProjectDesignViewModel : ViewModelBase
     // before UseLoadDateAsDefault so the aggregation→load-date rule does not overwrite the copy.
     private static DataField CloneField(DataField source) => new()
     {
+        // Carry the row id so a schema edit updates the existing field in place (keeping its answers)
+        // rather than deleting and re-inserting it.
+        Id = source.Id,
         Name = source.Name,
         FieldType = source.FieldType,
         Analysis = source.Analysis,

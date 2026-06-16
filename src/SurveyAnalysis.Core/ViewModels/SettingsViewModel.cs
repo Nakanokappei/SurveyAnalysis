@@ -114,6 +114,39 @@ public partial class SettingsViewModel : ViewModelBase
     [ObservableProperty]
     private string _reportModel = DefaultReportModel;
 
+    // ===== 埋め込み =====
+
+    // 埋め込みモデル（接続はチャットと共通の Endpoint / ApiKey を使う）
+    [ObservableProperty]
+    private string _embeddingModel = DefaultEmbeddingModel;
+
+    public ObservableCollection<string> EmbeddingModelOptions { get; } = new()
+    {
+        "text-embedding-3-small", "text-embedding-3-large", "text-embedding-ada-002"
+    };
+
+    // 並列実行数（同時リクエスト上限）
+    [ObservableProperty]
+    private string _llmConcurrency = DefaultLlmConcurrency;
+
+    // 埋め込み1リクエストあたりの件数
+    [ObservableProperty]
+    private string _llmEmbeddingBatchSize = DefaultLlmEmbeddingBatchSize;
+
+    // 1リクエストのタイムアウト（秒）
+    [ObservableProperty]
+    private string _llmRequestTimeoutSeconds = DefaultLlmRequestTimeoutSeconds;
+
+    // ===== データベース =====
+
+    // 起動時にデータベースを自動で最適化する（既定オン）
+    [ObservableProperty]
+    private bool _autoOptimizeOnStartup = DefaultAutoOptimizeOnStartup;
+
+    // バックアップを残す世代（保持ポリシー）。値は BackupRetention の名前（Off/Few/Standard/Many）。
+    [ObservableProperty]
+    private string _backupRetention = DefaultBackupRetention;
+
     // 読み取りフォルダを参照（プロトタイプでは未実装）
     [RelayCommand]
     private void BrowseFolder()
@@ -125,28 +158,31 @@ public partial class SettingsViewModel : ViewModelBase
     [RelayCommand]
     private void ResetToDefaults()
     {
-        CompanyName = DefaultCompanyName;
+        // Only fields that have a real default are restored. Fields with no initial value — 会社名,
+        // 差出人, 宛先, API キー, and the Gmail / SMTP credentials — are user-supplied, so reset must
+        // leave whatever the user entered untouched.
         ScanFolderPath = DefaultScanFolderPath;
         ArchiveAfterScan = true;
         ArchiveSubfolderName = DefaultArchiveSubfolderName;
 
-        MailFrom = DefaultMailFrom;
-        MailTo = DefaultMailTo;
         MailServerType = DefaultMailServerType;
-        GmailAddress = "";
-        GmailAppPassword = "";
         SmtpHost = DefaultSmtpHost;
         SmtpPort = DefaultSmtpPort;
-        SmtpUsername = "";
-        SmtpPassword = "";
         SmtpUseTls = true;
 
-        ApiKey = "";
         Endpoint = DefaultEndpoint;
         OcrModel = DefaultOcrModel;
         TopicModel = DefaultTopicModel;
         SentimentModel = DefaultSentimentModel;
         ReportModel = DefaultReportModel;
+
+        EmbeddingModel = DefaultEmbeddingModel;
+        LlmConcurrency = DefaultLlmConcurrency;
+        LlmEmbeddingBatchSize = DefaultLlmEmbeddingBatchSize;
+        LlmRequestTimeoutSeconds = DefaultLlmRequestTimeoutSeconds;
+
+        AutoOptimizeOnStartup = DefaultAutoOptimizeOnStartup;
+        BackupRetention = DefaultBackupRetention;
     }
 
     // Loads persisted values over the field defaults. Secret fields are stored protected, so they
@@ -177,6 +213,14 @@ public partial class SettingsViewModel : ViewModelBase
         TopicModel = Get(values, KeyTopicModel, DefaultTopicModel);
         SentimentModel = Get(values, KeySentimentModel, DefaultSentimentModel);
         ReportModel = Get(values, KeyReportModel, DefaultReportModel);
+
+        EmbeddingModel = Get(values, KeyEmbeddingModel, DefaultEmbeddingModel);
+        LlmConcurrency = Get(values, KeyLlmConcurrency, DefaultLlmConcurrency);
+        LlmEmbeddingBatchSize = Get(values, KeyLlmEmbeddingBatchSize, DefaultLlmEmbeddingBatchSize);
+        LlmRequestTimeoutSeconds = Get(values, KeyLlmRequestTimeoutSeconds, DefaultLlmRequestTimeoutSeconds);
+
+        AutoOptimizeOnStartup = GetBool(values, KeyAutoOptimizeOnStartup, DefaultAutoOptimizeOnStartup);
+        BackupRetention = Get(values, KeyBackupRetention, DefaultBackupRetention);
     }
 
     // Persists every field. Called by the dialog host when the settings window closes. Secret
@@ -210,6 +254,14 @@ public partial class SettingsViewModel : ViewModelBase
             [KeyTopicModel] = TopicModel,
             [KeySentimentModel] = SentimentModel,
             [KeyReportModel] = ReportModel,
+
+            [KeyEmbeddingModel] = EmbeddingModel,
+            [KeyLlmConcurrency] = LlmConcurrency,
+            [KeyLlmEmbeddingBatchSize] = LlmEmbeddingBatchSize,
+            [KeyLlmRequestTimeoutSeconds] = LlmRequestTimeoutSeconds,
+
+            [KeyAutoOptimizeOnStartup] = Bool(AutoOptimizeOnStartup),
+            [KeyBackupRetention] = BackupRetention,
         });
     }
 
@@ -242,15 +294,21 @@ public partial class SettingsViewModel : ViewModelBase
     private const string KeyTopicModel = "TopicModel";
     private const string KeySentimentModel = "SentimentModel";
     private const string KeyReportModel = "ReportModel";
+    private const string KeyEmbeddingModel = "EmbeddingModel";
+    private const string KeyLlmConcurrency = "LlmConcurrency";
+    private const string KeyLlmEmbeddingBatchSize = "LlmEmbeddingBatchSize";
+    private const string KeyLlmRequestTimeoutSeconds = "LlmRequestTimeoutSeconds";
+    private const string KeyAutoOptimizeOnStartup = "AutoOptimizeOnStartup";
+    private const string KeyBackupRetention = "BackupRetention";
 
     // Default values, kept in one place so reset and field initializers stay in sync.
-    private const string DefaultCompanyName = "○○ケーブル株式会社";
+    private const string DefaultCompanyName = "";
     // 既定はユーザーの書類フォルダ（Windows は「ドキュメント」、Mac は ~/Documents）。
     private static readonly string DefaultScanFolderPath =
         System.Environment.GetFolderPath(System.Environment.SpecialFolder.MyDocuments);
     private const string DefaultArchiveSubfolderName = "アーカイブ";
-    private const string DefaultMailFrom = "no-reply@example.co.jp";
-    private const string DefaultMailTo = "support@example.co.jp";
+    private const string DefaultMailFrom = "";
+    private const string DefaultMailTo = "";
     private const string DefaultMailServerType = "Gmail";
     private const string DefaultSmtpHost = "smtp.example.co.jp";
     private const string DefaultSmtpPort = "587";
@@ -259,4 +317,10 @@ public partial class SettingsViewModel : ViewModelBase
     private const string DefaultTopicModel = "gpt-4o-mini";
     private const string DefaultSentimentModel = "gpt-4o-mini";
     private const string DefaultReportModel = "gpt-4o";
+    private const string DefaultEmbeddingModel = "text-embedding-3-small";
+    private const string DefaultLlmConcurrency = "4";
+    private const string DefaultLlmEmbeddingBatchSize = "64";
+    private const string DefaultLlmRequestTimeoutSeconds = "100";
+    private const bool DefaultAutoOptimizeOnStartup = true;
+    private const string DefaultBackupRetention = "Standard";
 }

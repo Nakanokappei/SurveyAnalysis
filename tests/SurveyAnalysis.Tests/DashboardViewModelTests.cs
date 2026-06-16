@@ -22,12 +22,12 @@ public class DashboardViewModelTests
         using var temp = new TempDatabase();
         var projects = new ProjectRepository(temp.Db);
         var responses = new ResponseRepository(temp.Db);
+        var analytics = new AnalyticsRepository(temp.Db);
 
         var project = new Project { Name = "工事アンケート" };
         project.Fields.Add(new DataField { Name = "記入日", FieldType = FieldType.Date, UseForAggregation = true });
         project.Fields.Add(new DataField { Name = "氏名", FieldType = FieldType.Name });
         project.Fields.Add(new DataField { Name = "ご意見", FieldType = FieldType.FreeText, Analysis = AnalysisMethod.Sentiment });
-        project.Months.Add("2026年5月");
         var pid = projects.Insert(project);
 
         responses.InsertResponses(pid, "t.csv", new[]
@@ -37,7 +37,7 @@ public class DashboardViewModelTests
             Response(("記入日", "2026/04/10"), ("氏名", "別月さん"), ("ご意見", "先月分。")),
         });
 
-        var vm = new DashboardViewModel(projects.Load(pid)!, responses);
+        var vm = new DashboardViewModel(projects.Load(pid)!, analytics);
         // Pick an explicit May range so the test does not depend on today's date.
         vm.SetRange(DateRangePreset.Custom, new DateTime(2026, 5, 1), new DateTime(2026, 5, 31));
 
@@ -64,14 +64,13 @@ public class DashboardViewModelTests
     {
         using var temp = new TempDatabase();
         var projects = new ProjectRepository(temp.Db);
-        var responses = new ResponseRepository(temp.Db);
+        var analytics = new AnalyticsRepository(temp.Db);
 
         var project = new Project { Name = "P" };
         project.Fields.Add(new DataField { Name = "記入日", FieldType = FieldType.Date, UseForAggregation = true });
-        project.Months.Add("2026年5月");
         var pid = projects.Insert(project);
 
-        var vm = new DashboardViewModel(projects.Load(pid)!, responses);
+        var vm = new DashboardViewModel(projects.Load(pid)!, analytics);
         vm.SetRange(DateRangePreset.Custom, new DateTime(2026, 5, 1), new DateTime(2026, 5, 31));
 
         Assert.Equal(0, vm.TotalResponses);
