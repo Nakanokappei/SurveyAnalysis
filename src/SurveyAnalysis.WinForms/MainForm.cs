@@ -4,8 +4,11 @@ using System.ComponentModel;
 using System.Diagnostics;
 using System.Drawing;
 using System.IO;
+using System.Linq;
+using System.Threading.Tasks;
 using System.Windows.Forms;
 using SurveyAnalysis.Data;
+using SurveyAnalysis.Llm.Consumers;
 using SurveyAnalysis.Models;
 using SurveyAnalysis.ViewModels;
 
@@ -519,10 +522,47 @@ public sealed class MainForm : Form
             return;
         }
         vm.IsNameAvailable = name => _shell.IsProjectNameAvailable(name, 0);
+        RefineCsvWithLlm(vm);
 
         using var form = new ProjectDesignForm(vm);
         if (form.ShowDialog(this) == DialogResult.OK && form.ResultProject is { } project && vm.SourceCsv is { } csv)
             _shell.FinishProjectFromCsv(project, csv, Path.GetFileName(picker.FileName));
+    }
+
+    // Refines the heuristic CSV column types AND suggests a project description with the LLM before the
+    // design dialog opens, using the column names + a sample of rows as hints. Skipped silently when no
+    // API key is configured, and any failure (offline, bad key, unparseable reply) leaves the heuristic
+    // types and the empty description in place. Runs on a background thread (off the UI sync context, to
+    // avoid a deadlock) while the busy cursor is shown — the UI thread blocks here for the one request.
+    private void RefineCsvWithLlm(ProjectDesignViewModel vm)
+    {
+        if (vm.SourceCsv is not { Header.Count: > 0 } csv)
+            return;
+        var settings = _shell.CreateSettingsViewModel();
+        if (string.IsNullOrWhiteSpace(settings.ApiKey))
+            return;
+
+        var previousCursor = Cursor.Current;
+        try
+        {
+            UseWaitCursor = true;
+            Cursor.Current = Cursors.WaitCursor;
+            var inference = new LlmCsvInference(AppServices.Llm, settings.TopicModel);
+            var samples = csv.Rows.Take(20).ToArray();
+            var result = Task.Run(() => inference.InferAsync(csv.Header, samples, vm.ProjectDescription)).GetAwaiter().GetResult();
+            vm.ApplyInferredTypes(result.Types);
+            if (!string.IsNullOrWhiteSpace(result.Description) && string.IsNullOrWhiteSpace(vm.ProjectDescription))
+                vm.ProjectDescription = result.Description;
+        }
+        catch
+        {
+            // Keep the heuristic types / empty description on any failure.
+        }
+        finally
+        {
+            UseWaitCursor = false;
+            Cursor.Current = previousCursor;
+        }
     }
 
     // インポート（モーダル）。CSVを取り込み、回答にマージする。

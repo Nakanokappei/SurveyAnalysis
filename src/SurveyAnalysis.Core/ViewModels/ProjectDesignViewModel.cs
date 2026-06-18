@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.Collections.ObjectModel;
 using System.Collections.Specialized;
 using System.ComponentModel;
@@ -84,6 +85,15 @@ public partial class ProjectDesignViewModel : ViewModelBase
         ProjectDescription = existing.Description;
         foreach (var field in existing.Fields)
             Fields.Add(CloneField(field));
+    }
+
+    // Overrides the heuristic field types with the LLM's inference, matched by column name. Columns the
+    // inference omits keep their heuristic type. Called by the CSV-create flow before the dialog is shown.
+    public void ApplyInferredTypes(IReadOnlyDictionary<string, FieldType> inferred)
+    {
+        foreach (var field in Fields)
+            if (inferred.TryGetValue(field.Name, out var type))
+                field.FieldType = type;
     }
 
     // CSV-seeded create mode: one field per CSV column (data type guessed from the values), the
