@@ -181,7 +181,12 @@ internal sealed class DateRangePopup : Form
 
     private void UpdateRangeLabel() => _rangeLabel.Text = $"{_from:yyyy/MM/dd} 〜 {_to:yyyy/MM/dd}";
 
-    // Accent-fills the active preset button, resets the others.
+    // A brighter blue for hovering the already-selected preset: its accent fill + white text would
+    // otherwise hover to the near-white ContentBack, leaving white-on-white text.
+    private static readonly Color SelectedHover = ColorTranslator.FromHtml("#2B7DD6");
+
+    // Accent-fills the active preset button, resets the others. The hover colour is set per state too, so
+    // hovering the selected button brightens (white text stays legible) instead of fading to near-white.
     private void Highlight(DateRangePreset preset)
     {
         foreach (var (key, button) in _presetButtons)
@@ -189,6 +194,7 @@ internal sealed class DateRangePopup : Form
             var on = key == preset;
             button.BackColor = on ? Theme.Accent : Color.White;
             button.ForeColor = on ? Color.White : Theme.TitleText;
+            button.FlatAppearance.MouseOverBackColor = on ? SelectedHover : Theme.ContentBack;
         }
     }
 

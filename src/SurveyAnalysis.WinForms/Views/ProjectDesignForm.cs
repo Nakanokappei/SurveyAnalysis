@@ -30,11 +30,10 @@ internal sealed class ProjectDesignForm : Form
     private TabControl _tabs = null!;
     private ListBox _topicColumns = null!;
     private readonly System.Collections.Generic.List<DataField> _freeTextFields = new();
-    private ListBox _topicList = null!;
+    private Panel _topicListHost = null!;        // scroll container for the topic rows
+    private TableLayoutPanel _topicRows = null!; // one row per topic (label / ✏ / 削除)
     private Label _topicCaption = null!;
     private Button _topicAdd = null!;
-    private Button _topicRename = null!;
-    private Button _topicDelete = null!;
     private Button _topicRebuild = null!;
     private TableLayoutPanel _columnHeader = null!;
     private readonly Button _addField = new IconButton { Glyph = "➕", Text = "項目を追加", AutoSize = true, AutoSizeMode = AutoSizeMode.GrowAndShrink, Anchor = AnchorStyles.Left | AnchorStyles.Right, BackColor = Color.White, ForeColor = Theme.Accent, Font = Theme.Font(10f), Padding = new Padding(0, 11, 0, 11), Margin = Padding.Empty, Cursor = Cursors.Hand };
@@ -204,67 +203,77 @@ internal sealed class ProjectDesignForm : Form
 
     // ===== トピック タブ =====
 
-    // Left = the project's 自由記述 columns; right = the selected column's topic dictionary (add / rename
-    // / delete) plus the "再構築" (clustering) button. Topics are managed live against the database and
-    // only for saved columns (a column gains an id once the project is saved).
+    // Left = the project's 自由記述 columns with the "再構築" (clustering) button beneath them; right = the
+    // selected column's topic dictionary as a row list (each row: label / ✏ rename / 削除) with a full-width
+    // 追加 button beneath it. Both list areas share the same Percent row so they are the same height. Topics
+    // are managed live against the database and only for saved columns (a column gains an id once saved).
     private TabPage BuildTopicsTab()
     {
         var page = new TabPage("トピック") { BackColor = ColorTranslator.FromHtml("#F8FAFC"), UseVisualStyleBackColor = false, Padding = new Padding(16) };
 
         var layout = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 2, RowCount = 1, BackColor = ColorTranslator.FromHtml("#F8FAFC") };
-        layout.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, LogicalToDeviceUnits(190)));
+        layout.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, LogicalToDeviceUnits(250)));  // wide enough for the 再構築 label
         layout.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
         layout.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
 
-        // Left column: the 自由記述 column list.
-        var left = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 1, RowCount = 2, BackColor = ColorTranslator.FromHtml("#F8FAFC"), Margin = new Padding(0, 0, 12, 0) };
+        // Left column: heading, the 自由記述 column list, then the 再構築 button (full width, under the list).
+        var left = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 1, RowCount = 3, BackColor = ColorTranslator.FromHtml("#F8FAFC"), Margin = new Padding(0, 0, 12, 0) };
         left.RowStyles.Add(new RowStyle(SizeType.AutoSize));
         left.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
-        left.Controls.Add(new Label { Text = "自由記述の列", AutoSize = true, ForeColor = Theme.Muted, Font = Theme.Font(9f, FontStyle.Bold), Margin = new Padding(0, 0, 0, 6) }, 0, 0);
+        left.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+        left.Controls.Add(TopicPaneCaption("自由記述の列"), 0, 0);
         _topicColumns = new ListBox { Dock = DockStyle.Fill, Font = Theme.Font(9.5f), IntegralHeight = false, BorderStyle = BorderStyle.FixedSingle };
         _topicColumns.SelectedIndexChanged += (_, _) => OnTopicColumnSelected();
         left.Controls.Add(_topicColumns, 0, 1);
+        _topicRebuild = FullWidthButton("✨", "既存データからトピックを再構築", Theme.Accent);
+        _topicRebuild.FlatAppearance.BorderColor = Theme.Accent;
+        _topicRebuild.Click += (_, _) => RebuildTopics();
+        left.Controls.Add(_topicRebuild, 0, 2);
         layout.Controls.Add(left, 0, 0);
 
-        // Right column: caption + actions, the topic list, and the rebuild button.
+        // Right column: caption, the topic row list (scrolls), then a full-width 追加 button beneath it.
         var right = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 1, RowCount = 3, BackColor = ColorTranslator.FromHtml("#F8FAFC") };
         right.RowStyles.Add(new RowStyle(SizeType.AutoSize));
         right.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
         right.RowStyles.Add(new RowStyle(SizeType.AutoSize));
 
-        var head = new FlowLayoutPanel { Dock = DockStyle.Top, AutoSize = true, AutoSizeMode = AutoSizeMode.GrowAndShrink, WrapContents = false, BackColor = ColorTranslator.FromHtml("#F8FAFC"), Margin = new Padding(0, 0, 0, 6) };
-        _topicCaption = new Label { Text = "列を選択してください", AutoSize = true, ForeColor = Theme.BodyText, Font = Theme.Font(9.5f, FontStyle.Bold), Margin = new Padding(0, 6, 12, 0) };
-        _topicAdd = SmallButton("追加");
-        _topicRename = SmallButton("名前変更");
-        _topicDelete = SmallButton("削除");
+        _topicCaption = TopicPaneCaption("列を選択してください");
+        right.Controls.Add(_topicCaption, 0, 0);
+
+        // The rows live in a Dock=Top stack inside an AutoScroll host, so their width tracks the host
+        // (shrinking when the scrollbar appears) and a long dictionary scrolls without a horizontal bar.
+        _topicListHost = new Panel { Dock = DockStyle.Fill, AutoScroll = true, BackColor = Color.White, BorderStyle = BorderStyle.FixedSingle };
+        _topicRows = new TableLayoutPanel { Dock = DockStyle.Top, ColumnCount = 1, AutoSize = true, AutoSizeMode = AutoSizeMode.GrowAndShrink, GrowStyle = TableLayoutPanelGrowStyle.AddRows, BackColor = Color.White };
+        _topicRows.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
+        _topicListHost.Controls.Add(_topicRows);
+        right.Controls.Add(_topicListHost, 0, 1);
+
+        _topicAdd = FullWidthButton("➕", "トピックを追加", Theme.Accent);
+        _topicAdd.FlatAppearance.BorderColor = ColorTranslator.FromHtml("#CBD5E1");
         _topicAdd.Click += (_, _) => AddTopic();
-        _topicRename.Click += (_, _) => RenameTopic();
-        _topicDelete.Click += (_, _) => DeleteTopic();
-        head.Controls.Add(_topicCaption);
-        head.Controls.Add(_topicAdd);
-        head.Controls.Add(_topicRename);
-        head.Controls.Add(_topicDelete);
-        right.Controls.Add(head, 0, 0);
-
-        _topicList = new ListBox { Dock = DockStyle.Fill, Font = Theme.Font(9.5f), IntegralHeight = false, BorderStyle = BorderStyle.FixedSingle };
-        right.Controls.Add(_topicList, 0, 1);
-
-        _topicRebuild = new IconButton { Glyph = "✨", Text = "既存データからトピックを再構築", AutoSize = true, AutoSizeMode = AutoSizeMode.GrowAndShrink, Anchor = AnchorStyles.Left, BackColor = Color.White, ForeColor = Theme.Accent, Font = Theme.Font(9.5f), Padding = new Padding(12, 7, 12, 7), Margin = new Padding(0, 8, 0, 0), Cursor = Cursors.Hand };
-        _topicRebuild.FlatAppearance.BorderColor = Theme.Accent;
-        _topicRebuild.Click += (_, _) => RebuildTopics();
-        right.Controls.Add(_topicRebuild, 0, 2);
+        right.Controls.Add(_topicAdd, 0, 2);
 
         layout.Controls.Add(right, 1, 0);
         page.Controls.Add(layout);
         return page;
     }
 
-    private Button SmallButton(string text)
+    // A pane heading for the トピック tab (left "自由記述の列" / right caption), sized identically so the two
+    // list areas below them line up at the same height.
+    private static Label TopicPaneCaption(string text) => new()
     {
-        var button = new Button { Text = text, AutoSize = true, FlatStyle = FlatStyle.Flat, BackColor = Color.White, ForeColor = Theme.BodyText, Font = Theme.Font(9f), Cursor = Cursors.Hand, Margin = new Padding(0, 2, 6, 0), Padding = new Padding(8, 3, 8, 3) };
-        button.FlatAppearance.BorderColor = Theme.CardBorder;
-        return button;
-    }
+        Text = text, AutoSize = true, ForeColor = Theme.BodyText, Font = Theme.Font(9.5f, FontStyle.Bold),
+        Anchor = AnchorStyles.Left, Margin = new Padding(0, 0, 0, 6),
+    };
+
+    // A flat, full-width (stretches to its column) accent button matching the 全般 tab's 項目を追加 — used for
+    // both 追加 and 再構築 so their rows are the same height (keeping the two list areas aligned).
+    private static IconButton FullWidthButton(string glyph, string text, Color foreColor) => new()
+    {
+        Glyph = glyph, Text = text, AutoSize = true, AutoSizeMode = AutoSizeMode.GrowAndShrink,
+        Anchor = AnchorStyles.Left | AnchorStyles.Right, BackColor = Color.White, ForeColor = foreColor,
+        Font = Theme.Font(10f), Padding = new Padding(0, 11, 0, 11), Margin = new Padding(0, 8, 0, 0), Cursor = Cursors.Hand,
+    };
 
     // (Re)loads the 自由記述 column list from the current draft fields. Called when the トピック tab opens
     // so it reflects edits made on 全般.
@@ -300,36 +309,84 @@ internal sealed class ProjectDesignForm : Form
     // an unsaved column (new project / just-added field) shows a hint until the project is saved.
     private void OnTopicColumnSelected()
     {
-        _topicList.Items.Clear();
         var field = SelectedTopicField;
         if (field is null)
         {
             _topicCaption.Text = _vm.Fields.Any(f => f.FieldType == FieldType.FreeText) ? "列を選択してください" : "自由記述（テキスト（改行あり））の列がありません";
+            RebuildTopicRows(Array.Empty<FieldTopic>());
             EnableTopicActions(false, false);
             return;
         }
         if (field.Id <= 0)
         {
             _topicCaption.Text = $"「{ColumnLabel(field)}」：保存後にトピックを管理できます";
+            RebuildTopicRows(Array.Empty<FieldTopic>());
             EnableTopicActions(false, false);
             return;
         }
 
         _topicCaption.Text = $"「{ColumnLabel(field)}」のトピック";
-        foreach (var topic in AppServices.Topics.ListTopics(field.Id))
-            _topicList.Items.Add(new TopicItem(topic.Id, topic.Label));
+        RebuildTopicRows(AppServices.Topics.ListTopics(field.Id));
         EnableTopicActions(true, true);
     }
 
+    // The 追加 / 再構築 buttons enable with a saved column; rename / delete are per-row (shown only when
+    // there are rows), so they need no separate toggle.
     private void EnableTopicActions(bool canAdd, bool canRebuild)
     {
         _topicAdd.Enabled = canAdd;
-        _topicRename.Enabled = canAdd;
-        _topicDelete.Enabled = canAdd;
         _topicRebuild.Enabled = canRebuild;
     }
 
     private static string ColumnLabel(DataField field) => string.IsNullOrWhiteSpace(field.Name) ? "（未命名）" : field.Name;
+
+    // Rebuilds the topic row list for the selected column: one row per topic (label / ✏ rename / 削除).
+    private void RebuildTopicRows(System.Collections.Generic.IReadOnlyList<FieldTopic> topics)
+    {
+        _topicRows.SuspendLayout();
+        foreach (Control old in _topicRows.Controls)
+            old.Dispose();
+        _topicRows.Controls.Clear();
+        _topicRows.RowStyles.Clear();
+        _topicRows.RowCount = 0;
+        foreach (var topic in topics)
+        {
+            _topicRows.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+            _topicRows.Controls.Add(BuildTopicRow(topic), 0, _topicRows.RowCount);
+            _topicRows.RowCount++;
+        }
+        _topicRows.ResumeLayout();
+    }
+
+    // One topic row: the label fills the width, then a ✏ rename button and a 削除 button at the right end.
+    // The 削除 style mirrors the 全般 tab's data-item delete button (red text, soft red border).
+    private Control BuildTopicRow(FieldTopic topic)
+    {
+        var row = new TableLayoutPanel
+        {
+            ColumnCount = 3, RowCount = 1, AutoSize = true, AutoSizeMode = AutoSizeMode.GrowAndShrink,
+            Anchor = AnchorStyles.Left | AnchorStyles.Right, BackColor = Color.White,
+            Margin = Padding.Empty, Padding = new Padding(8, 3, 8, 3),
+        };
+        row.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
+        row.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
+        row.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
+
+        var label = new Label { Text = topic.Label, AutoSize = true, ForeColor = Theme.TitleText, Font = Theme.Font(9.5f), Anchor = AnchorStyles.Left, Margin = new Padding(0, 0, 8, 0) };
+
+        var rename = new IconButton { Glyph = Icons.Edit.Glyph, IconFontName = Icons.Edit.Font, IconSize = 9f, AutoSize = true, BackColor = Color.White, ForeColor = Theme.Muted, Font = Theme.Font(9f), Cursor = Cursors.Hand, Anchor = AnchorStyles.None, Margin = new Padding(0, 0, 6, 0), Padding = new Padding(7, 2, 7, 2) };
+        rename.FlatAppearance.BorderColor = Theme.CardBorder;
+        rename.Click += (_, _) => RenameTopic(topic);
+
+        var remove = new Button { Text = "削除", AutoSize = true, FlatStyle = FlatStyle.Flat, ForeColor = Theme.Danger, BackColor = Color.White, Font = Theme.Font(9f), Cursor = Cursors.Hand, Anchor = AnchorStyles.None, Margin = Padding.Empty, Padding = new Padding(8, 2, 8, 2) };
+        remove.FlatAppearance.BorderColor = ColorTranslator.FromHtml("#FCA5A5");
+        remove.Click += (_, _) => DeleteTopic(topic);
+
+        row.Controls.Add(label, 0, 0);
+        row.Controls.Add(rename, 1, 0);
+        row.Controls.Add(remove, 2, 0);
+        return row;
+    }
 
     private void AddTopic()
     {
@@ -338,7 +395,7 @@ internal sealed class ProjectDesignForm : Form
         var label = PromptForText("トピックを追加", "トピック名", "");
         if (label is null)
             return;
-        if (_topicList.Items.Cast<TopicItem>().Any(t => t.Label == label))
+        if (AppServices.Topics.ListTopics(field.Id).Any(t => t.Label == label))
         {
             MessageBox.Show(this, "同じ名前のトピックが既にあります。", "トピック", MessageBoxButtons.OK, MessageBoxIcon.Information);
             return;
@@ -347,30 +404,31 @@ internal sealed class ProjectDesignForm : Form
         OnTopicColumnSelected();
     }
 
-    private void RenameTopic()
+    // Rename via a topic row's ✏ button. Topic names need only be unique within their column (the same
+    // label may exist under a different 自由記述 column), so the clash check is scoped to this field.
+    private void RenameTopic(FieldTopic topic)
     {
-        if (SelectedTopicField is not { Id: > 0 } || _topicList.SelectedItem is not TopicItem current)
+        if (SelectedTopicField is not { Id: > 0 } field)
             return;
-        var label = PromptForText("トピック名を変更", "トピック名", current.Label);
-        if (label is null || label == current.Label)
+        var label = PromptForText("トピック名を変更", "トピック名", topic.Label);
+        if (label is null || label == topic.Label)
             return;
-        if (_topicList.Items.Cast<TopicItem>().Any(t => t.Id != current.Id && t.Label == label))
+        if (AppServices.Topics.ListTopics(field.Id).Any(t => t.Id != topic.Id && t.Label == label))
         {
             MessageBox.Show(this, "同じ名前のトピックが既にあります。", "トピック", MessageBoxButtons.OK, MessageBoxIcon.Information);
             return;
         }
-        AppServices.Topics.RenameTopic(current.Id, label);
+        AppServices.Topics.RenameTopic(topic.Id, label);
         OnTopicColumnSelected();
     }
 
-    private void DeleteTopic()
+    // Delete via a topic row's 削除 button.
+    private void DeleteTopic(FieldTopic topic)
     {
-        if (_topicList.SelectedItem is not TopicItem current)
-            return;
-        var answer = MessageBox.Show(this, $"トピック「{current.Label}」を削除します。よろしいですか？", "トピックの削除", MessageBoxButtons.YesNo, MessageBoxIcon.Warning, MessageBoxDefaultButton.Button2);
+        var answer = MessageBox.Show(this, $"トピック「{topic.Label}」を削除します。よろしいですか？", "トピックの削除", MessageBoxButtons.YesNo, MessageBoxIcon.Warning, MessageBoxDefaultButton.Button2);
         if (answer != DialogResult.Yes)
             return;
-        AppServices.Topics.DeleteTopic(current.Id);
+        AppServices.Topics.DeleteTopic(topic.Id);
         OnTopicColumnSelected();
     }
 
@@ -399,7 +457,7 @@ internal sealed class ProjectDesignForm : Form
             return;
         }
 
-        var existingCount = _topicList.Items.Count;
+        var existingCount = AppServices.Topics.ListTopics(field.Id).Count;
         var confirm = MessageBox.Show(this,
             $"「{ColumnLabel(field)}」の回答 {answers.Count} 件からトピックを自動生成します。"
                 + (existingCount > 0 ? $"\n現在のトピック {existingCount} 件は置き換えられます。" : "")
@@ -466,12 +524,6 @@ internal sealed class ProjectDesignForm : Form
         form.AcceptButton = ok;
         form.CancelButton = cancel;
         return form.ShowDialog(this) == DialogResult.OK && box.Text.Trim().Length > 0 ? box.Text.Trim() : null;
-    }
-
-    // A topic row in the list: carries the id so rename / delete address the right row.
-    private sealed record TopicItem(long Id, string Label)
-    {
-        public override string ToString() => Label;
     }
 
     // When the field list scrolls vertically its rows lose the scrollbar's width; inset the (fixed)

@@ -281,6 +281,7 @@ public sealed class MainForm : Form
             AddRow(bottom, NavButton(Icons.Export, "エクスポート", OnExportNotImplemented));
             AddRow(bottom, Divider());
             AddRow(bottom, NavButton(Icons.Close, "プロジェクトを閉じる", OnCloseProject));
+            AddRow(bottom, Divider());   // set 設定 off from the project actions above it
         }
         AddRow(bottom, NavButton(Icons.Settings, "設定", OnSettings));
 

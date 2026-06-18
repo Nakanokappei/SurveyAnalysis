@@ -135,6 +135,8 @@ internal static class SliceTableView
             RowHeadersVisible = false,
             BackgroundColor = Color.White,
             BorderStyle = BorderStyle.None,
+            // No gridlines between data cells — a flat list, matching the dashboard's tables.
+            CellBorderStyle = DataGridViewCellBorderStyle.None,
             SelectionMode = DataGridViewSelectionMode.FullRowSelect,
             MultiSelect = false,
             Font = Theme.Font(9.5f),
@@ -144,6 +146,14 @@ internal static class SliceTableView
         grid.ColumnHeadersDefaultCellStyle.Font = Theme.Font(9.5f, FontStyle.Bold);
         grid.ColumnHeadersDefaultCellStyle.BackColor = Theme.ContentBack;
         grid.ColumnHeadersDefaultCellStyle.ForeColor = Theme.Muted;
+        // Soft row-selection highlight (not the heavy system blue) and no header tint for the selected
+        // column — same as the dashboard table so the two never diverge.
+        grid.DefaultCellStyle.BackColor = Color.White;
+        grid.DefaultCellStyle.ForeColor = Theme.TitleText;
+        grid.DefaultCellStyle.SelectionBackColor = Color.FromArgb(0xD6, 0xE6, 0xF5);
+        grid.DefaultCellStyle.SelectionForeColor = Theme.TitleText;
+        grid.ColumnHeadersDefaultCellStyle.SelectionBackColor = Theme.ContentBack;
+        grid.ColumnHeadersDefaultCellStyle.SelectionForeColor = Theme.Muted;
         return grid;
     }
 
