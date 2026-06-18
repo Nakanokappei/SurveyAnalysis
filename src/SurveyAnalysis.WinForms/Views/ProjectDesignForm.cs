@@ -62,6 +62,10 @@ internal sealed class ProjectDesignForm : Form
         MinimumSize = new Size(LogicalToDeviceUnits(560), LogicalToDeviceUnits(320));
         Font = Theme.Font();
         BackColor = ColorTranslator.FromHtml("#F8FAFC");
+        // 8 DIP gap between the window edges and the content (tab control / action bar), matching the
+        // settings dialog. The tab control is docked, so its Margin is ignored — the form's Padding is
+        // what insets it from the window frame.
+        Padding = new Padding(LogicalToDeviceUnits(8));
 
         BuildLayout();
 
