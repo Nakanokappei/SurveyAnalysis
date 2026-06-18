@@ -1,8 +1,10 @@
 using System;
+using System.Collections.Generic;
 using System.Collections.Specialized;
 using System.Drawing;
 using System.Linq;
 using System.Windows.Forms;
+using SurveyAnalysis.Llm.Consumers;
 using SurveyAnalysis.Models;
 using SurveyAnalysis.ViewModels;
 
@@ -368,10 +370,83 @@ internal sealed class ProjectDesignForm : Form
         OnTopicColumnSelected();
     }
 
-    // Phase 4 で実装：埋め込み→クラスタリング→命名でトピック辞書を自動生成する。
+    // Auto-generates the column's topic dictionary from its existing 自由記述 answers: embed → cluster →
+    // name (LLM), replace the dictionary, then offer to re-assign existing responses. Needs an API key and
+    // a couple of distinct answers; the progress dialog runs the (cancellable) LLM work.
     private void RebuildTopics()
     {
-        MessageBox.Show(this, "既存データからのトピック自動生成は次の更新で有効になります。", "トピックの再構築", MessageBoxButtons.OK, MessageBoxIcon.Information);
+        if (SelectedTopicField is not { Id: > 0 } field)
+            return;
+
+        var settings = new SettingsViewModel(AppServices.Settings);
+        if (string.IsNullOrWhiteSpace(settings.ApiKey))
+        {
+            MessageBox.Show(this, "トピックの自動生成には LLM の API キーが必要です。\n設定 → LLM で設定してください。",
+                "トピックの再構築", MessageBoxButtons.OK, MessageBoxIcon.Information);
+            return;
+        }
+
+        // The column's stored answers are the clustering input; a couple of distinct ones are needed.
+        var answers = AppServices.Responses.LoadValuesForField(field.Id);
+        if (answers.Distinct().Count() < 2)
+        {
+            MessageBox.Show(this, "再構築するには、この列に取り込まれた自由記述の回答が複数必要です。",
+                "トピックの再構築", MessageBoxButtons.OK, MessageBoxIcon.Information);
+            return;
+        }
+
+        var existingCount = _topicList.Items.Count;
+        var confirm = MessageBox.Show(this,
+            $"「{ColumnLabel(field)}」の回答 {answers.Count} 件からトピックを自動生成します。"
+                + (existingCount > 0 ? $"\n現在のトピック {existingCount} 件は置き換えられます。" : "")
+                + "\n\n続けますか？",
+            "トピックの再構築", MessageBoxButtons.OKCancel, MessageBoxIcon.Question);
+        if (confirm != DialogResult.OK)
+            return;
+
+        // Cluster + name with the progress dialog; the work delegate writes the result back to `built`.
+        IReadOnlyList<TopicClusterer.Topic> built = Array.Empty<TopicClusterer.Topic>();
+        var clusterer = new TopicClusterer(AppServices.Llm, settings.TopicModel);
+        using (var dialog = new AnalyzeProgressForm(async (progress, ct) =>
+                   built = await clusterer.BuildTopicsAsync(answers, progress, ct)))
+        {
+            if (dialog.ShowDialog(this) != DialogResult.OK)
+                return;
+        }
+        if (built.Count == 0)
+        {
+            MessageBox.Show(this, "トピックを生成できませんでした。", "トピックの再構築", MessageBoxButtons.OK, MessageBoxIcon.Information);
+            return;
+        }
+
+        // Replace the column's dictionary with the new labels + centroids, then refresh the list.
+        AppServices.Topics.ReplaceTopics(field.Id, built.Select(t => (t.Label, (float[]?)t.Centroid)).ToList());
+        OnTopicColumnSelected();
+
+        OfferReassignExistingResponses();
+    }
+
+    // After rebuilding a column's topics, offer to route every existing response to the new dictionary.
+    // Re-runs the import analyzer over the saved project (sentiment is served from the LLM cache, so this
+    // is effectively just topic assignment) and rebuilds the star so the トピック別 view reflects it.
+    private void OfferReassignExistingResponses()
+    {
+        if (_vm.EditingProjectId is not { } projectId)
+            return;
+        var answer = MessageBox.Show(this,
+            "既存の回答を、新しいトピックに割り当て直しますか？",
+            "トピックの再構築", MessageBoxButtons.YesNo, MessageBoxIcon.Question);
+        if (answer != DialogResult.Yes)
+            return;
+
+        if (AppServices.Projects.Load(projectId) is not { } project)
+            return;
+
+        var settings = new SettingsViewModel(AppServices.Settings);
+        var analyzer = new ImportAnalyzer(AppServices.Llm, AppServices.Responses, AppServices.Topics, AppServices.AnalysisResults, settings.SentimentModel);
+        using var dialog = new AnalyzeProgressForm((progress, ct) => analyzer.AnalyzeAsync(project, progress, ct));
+        if (dialog.ShowDialog(this) == DialogResult.OK)
+            AppServices.Analytics.Rebuild(project);
     }
 
     // A minimal single-line text prompt (WinForms has no built-in InputBox). Returns the trimmed text, or

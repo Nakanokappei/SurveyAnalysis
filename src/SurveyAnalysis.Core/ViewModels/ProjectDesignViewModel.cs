@@ -60,6 +60,10 @@ public partial class ProjectDesignViewModel : ViewModelBase
     // the dialog title and the confirm button label, and tells CreateProject to update in place.
     private readonly Project? _editingProject;
     public bool IsEditing => _editingProject is not null;
+
+    // The id of the project being edited (0/null in create modes). The host uses it to reload the saved
+    // project when re-analysing existing responses after a topic rebuild.
+    public long? EditingProjectId => _editingProject?.Id;
     public string DialogTitle => IsEditing ? "プロジェクトの構成" : "プロジェクト作成";
     public string ConfirmLabel => IsEditing ? "変更を保存" : "このデータ形式で作成";
 

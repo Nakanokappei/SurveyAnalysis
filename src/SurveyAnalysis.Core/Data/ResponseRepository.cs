@@ -151,6 +151,27 @@ public sealed class ResponseRepository
         return order.Select(id => (id, (IReadOnlyDictionary<string, string>)byResponse[id])).ToList();
     }
 
+    // Every non-empty answer value stored for one field, oldest first. Topic clustering reads a 自由記述
+    // column's answers this way to build its topic dictionary from existing data.
+    public IReadOnlyList<string> LoadValuesForField(long fieldId)
+    {
+        using var connection = _db.Open();
+        using var command = connection.CreateCommand();
+        command.CommandText = """
+            SELECT a.value
+            FROM answers a
+            WHERE a.field_id = $f AND a.value IS NOT NULL AND TRIM(a.value) <> ''
+            ORDER BY a.response_id ASC;
+            """;
+        command.Parameters.AddWithValue("$f", fieldId);
+
+        var values = new List<string>();
+        using var reader = command.ExecuteReader();
+        while (reader.Read())
+            values.Add(reader.GetString(0));
+        return values;
+    }
+
     // Total responses stored for a project (shown as import feedback; the dashboard will use this).
     public int CountForProject(long projectId)
     {
