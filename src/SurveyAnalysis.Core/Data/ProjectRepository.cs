@@ -27,10 +27,11 @@ public sealed class ProjectRepository
         {
             insertProject.Transaction = transaction;
             insertProject.CommandText = """
-                INSERT INTO projects (name, created_utc, updated_utc) VALUES ($name, $now, $now);
+                INSERT INTO projects (name, description, created_utc, updated_utc) VALUES ($name, $desc, $now, $now);
                 SELECT last_insert_rowid();
                 """;
             insertProject.Parameters.AddWithValue("$name", project.Name);
+            insertProject.Parameters.AddWithValue("$desc", project.Description);
             insertProject.Parameters.AddWithValue("$now", now);
             projectId = (long)insertProject.ExecuteScalar()!;
         }
@@ -59,8 +60,9 @@ public sealed class ProjectRepository
         using (var updateProject = connection.CreateCommand())
         {
             updateProject.Transaction = transaction;
-            updateProject.CommandText = "UPDATE projects SET name = $name, updated_utc = $now WHERE id = $id;";
+            updateProject.CommandText = "UPDATE projects SET name = $name, description = $desc, updated_utc = $now WHERE id = $id;";
             updateProject.Parameters.AddWithValue("$name", project.Name);
+            updateProject.Parameters.AddWithValue("$desc", project.Description);
             updateProject.Parameters.AddWithValue("$now", now);
             updateProject.Parameters.AddWithValue("$id", project.Id);
             updateProject.ExecuteNonQuery();
@@ -191,16 +193,19 @@ public sealed class ProjectRepository
         using var connection = _db.Open();
 
         string name;
+        string description;
         using (var loadProject = connection.CreateCommand())
         {
-            loadProject.CommandText = "SELECT name FROM projects WHERE id = $id;";
+            loadProject.CommandText = "SELECT name, description FROM projects WHERE id = $id;";
             loadProject.Parameters.AddWithValue("$id", id);
-            if (loadProject.ExecuteScalar() is not string projectName)
+            using var reader = loadProject.ExecuteReader();
+            if (!reader.Read())
                 return null;
-            name = projectName;
+            name = reader.GetString(0);
+            description = reader.IsDBNull(1) ? "" : reader.GetString(1);
         }
 
-        var project = new Project { Id = id, Name = name };
+        var project = new Project { Id = id, Name = name, Description = description };
 
         using (var loadFields = connection.CreateCommand())
         {

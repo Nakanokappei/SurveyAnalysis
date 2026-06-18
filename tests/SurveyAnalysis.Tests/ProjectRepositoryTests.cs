@@ -41,6 +41,21 @@ public class ProjectRepositoryTests
     }
 
     [Fact]
+    public void Description_round_trips_through_insert_load_and_update()
+    {
+        using var temp = new TempDatabase();
+        var repo = new ProjectRepository(temp.Db);
+
+        var project = new Project { Name = "説明あり", Description = "工事後アンケート。自由記述を分析する。" };
+        var id = repo.Insert(project);
+        Assert.Equal("工事後アンケート。自由記述を分析する。", repo.Load(id)!.Description);
+
+        var draft = new Project { Id = id, Name = "説明あり", Description = "更新後の説明" };
+        repo.Update(draft);
+        Assert.Equal("更新後の説明", repo.Load(id)!.Description);
+    }
+
+    [Fact]
     public void Insert_rejects_a_duplicate_project_name()
     {
         using var temp = new TempDatabase();

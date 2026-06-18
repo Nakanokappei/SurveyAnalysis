@@ -20,6 +20,7 @@ public static class AppServices
     public static readonly SettingsRepository Settings = new(Database);
     public static readonly ResponseRepository Responses = new(Database);
     public static readonly AnalyticsRepository Analytics = new(Database);
+    public static readonly TopicRepository Topics = new(Database);
 
     // Backup / optimize / restore for the database file (driven from the settings dialog and on close).
     public static readonly DatabaseMaintenance Maintenance = new(Database.DatabaseFilePath);

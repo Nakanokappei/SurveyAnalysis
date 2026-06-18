@@ -34,6 +34,10 @@ public partial class ProjectDesignViewModel : ViewModelBase
     [ObservableProperty]
     private string _projectName = "新しいプロジェクト";
 
+    // プロジェクトの説明（任意）。取り込み/OCR 時に LLM へ与えるヒント。
+    [ObservableProperty]
+    private string _projectDescription = "";
+
     // 設計中のデータ項目（縦に並ぶ）
     public ObservableCollection<DataField> Fields { get; } = new();
 
@@ -77,6 +81,7 @@ public partial class ProjectDesignViewModel : ViewModelBase
         _editingProject = existing;
         Fields.CollectionChanged += OnFieldsChanged;
         ProjectName = existing.Name;
+        ProjectDescription = existing.Description;
         foreach (var field in existing.Fields)
             Fields.Add(CloneField(field));
     }
@@ -173,6 +178,7 @@ public partial class ProjectDesignViewModel : ViewModelBase
         {
             Id = _editingProject?.Id ?? 0,
             Name = string.IsNullOrWhiteSpace(ProjectName) ? "新しいプロジェクト" : ProjectName.Trim(),
+            Description = ProjectDescription.Trim(),
         };
         foreach (var field in Fields)
             project.Fields.Add(field);

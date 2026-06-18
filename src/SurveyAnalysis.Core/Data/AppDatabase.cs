@@ -78,7 +78,7 @@ public sealed class AppDatabase
 
     // The raw schema version this build expects. Bump it and add a matching case to MigrationSql when
     // the raw tables change; the runner then carries existing databases forward one step at a time.
-    private const long CurrentRawVersion = 3;
+    private const long CurrentRawVersion = 4;
 
     // Migrates the raw tables to CurrentRawVersion, using PRAGMA user_version (stored in the database
     // header) as the on-disk marker. Each step runs in its own transaction and advances the version,
@@ -116,6 +116,7 @@ public sealed class AppDatabase
         1 => V1BaselineSql,
         2 => V2SourcePathSql,
         3 => V3UniqueNamesSql,
+        4 => V4DescriptionTopicsSql,
         _ => throw new InvalidOperationException($"No migration defined for raw schema version {version}."),
     };
 
@@ -200,6 +201,25 @@ public sealed class AppDatabase
         );
 
         CREATE UNIQUE INDEX idx_projects_name ON projects(name);
+        """;
+
+    // v3 → v4: give projects a free-text description (a hint for LLM import/OCR) and add the per-column
+    // topic dictionary. field_topics is raw, user-managed (add/edit/delete) and also fillable by
+    // clustering; centroid holds the cluster centre (float32[] as a BLOB) used to assign new answers.
+    // Topics are scoped to a field so the same label can exist under different 自由記述 columns.
+    private const string V4DescriptionTopicsSql = """
+        ALTER TABLE projects ADD COLUMN description TEXT;
+
+        CREATE TABLE field_topics (
+            id           INTEGER PRIMARY KEY AUTOINCREMENT,
+            field_id     INTEGER NOT NULL REFERENCES fields(id) ON DELETE CASCADE,
+            label        TEXT NOT NULL,
+            centroid     BLOB,
+            created_utc  TEXT NOT NULL,
+            UNIQUE(field_id, label)
+        );
+
+        CREATE INDEX idx_field_topics_field ON field_topics(field_id);
         """;
 
     // Analytics star schema, derived from responses/answers by ETL (AnalyticsRepository). One

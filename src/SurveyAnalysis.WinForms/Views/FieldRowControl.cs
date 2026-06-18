@@ -26,8 +26,10 @@ internal sealed class FieldRowControl : TableLayoutPanel
     // The 8 shared columns: #, 項目名, データ型, 分析方法, 月次集計, 読み込み日, 暗号化, 削除. Width 0 = the
     // flexible (Percent) column (項目名); the rest are fixed pixel widths sized to their content (the
     // combos and the 削除 button). Used by both the header row (ProjectDesignForm) and every field row so
-    // they line up. Pixel widths — this dialog renders unscaled, like the rest of the app.
-    public static readonly int[] ColumnWidths = { OrdinalColumnWidth(), 0, 176, 200, 96, 120, 96, 88 };
+    // they line up. Pixel widths — this dialog renders unscaled, like the rest of the app. データ型 is
+    // measured to fit its longest option ("テキスト（改行あり）"); 項目名 (the flexible column) gives up
+    // that width.
+    public static readonly int[] ColumnWidths = { OrdinalColumnWidth(), 0, DataTypeColumnWidth(), 200, 96, 120, 96, 88 };
 
     // Width for the # column: enough for 3 half-width digits ("999"). The font renders at the real screen
     // DPI even though this dialog's layout is otherwise unscaled, so a hardcoded px width clips wider
@@ -37,6 +39,16 @@ internal sealed class FieldRowControl : TableLayoutPanel
     {
         using var font = Theme.Font(9.5f);
         return TextRenderer.MeasureText("999", font).Width + 8;
+    }
+
+    // Width for the データ型 column: the longest option ("テキスト（改行あり）") plus the dropdown arrow and
+    // combo padding, so the option never clips. Measured in the real render context (same reason as the #
+    // column). This is ~4 full-width characters wider than the old fixed 176; the flexible 項目名 column
+    // absorbs the difference.
+    private static int DataTypeColumnWidth()
+    {
+        using var font = Theme.Font(9.5f);
+        return TextRenderer.MeasureText("テキスト（改行あり）", font).Width + 48;
     }
 
     public static void DefineColumns(TableLayoutPanel t)
