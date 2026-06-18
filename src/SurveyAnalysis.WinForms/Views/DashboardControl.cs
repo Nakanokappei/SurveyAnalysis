@@ -235,11 +235,15 @@ internal sealed class DashboardControl : UserControl
         return panel;
     }
 
-    // A bars container: one column, one auto-sized row per bar; the panel grows with its bars.
+    // A bars container: every bar shares this one 3-column grid — label | proportional bar | count —
+    // so the label column auto-sizes to the widest label and all bars start at the same x (the "0" point
+    // lines up across rows, instead of each row's own label width pushing it around).
     private static TableLayoutPanel NewBarsPanel()
     {
-        var panel = new TableLayoutPanel { ColumnCount = 1, AutoSize = true, AutoSizeMode = AutoSizeMode.GrowAndShrink, BackColor = Color.White, Margin = new Padding(0) };
-        panel.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
+        var panel = new TableLayoutPanel { ColumnCount = 3, AutoSize = true, AutoSizeMode = AutoSizeMode.GrowAndShrink, BackColor = Color.White, Margin = new Padding(0) };
+        panel.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));      // label (shared → bars align)
+        panel.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));  // proportional bar track
+        panel.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));      // count
         return panel;
     }
 
@@ -306,7 +310,8 @@ internal sealed class DashboardControl : UserControl
         _emptyHint.Visible = _vm.HasNoResponses;
     }
 
-    // Rebuilds a bar chart from its items: one row each (label | proportional bar | count).
+    // Rebuilds a bar chart into the shared 3-column grid: each bar's label, proportional bar and count
+    // go into one grid row, so the columns (and therefore the bar starts) line up across all rows.
     private void RefreshBars(TableLayoutPanel panel, ObservableCollection<BarItem> bars, bool drillable)
     {
         panel.SuspendLayout();
@@ -317,44 +322,33 @@ internal sealed class DashboardControl : UserControl
         panel.RowCount = 0;
         foreach (var bar in bars)
         {
+            var row = panel.RowCount;
             panel.RowStyles.Add(new RowStyle(SizeType.AutoSize));
-            panel.Controls.Add(MakeBarRow(bar, drillable), 0, panel.RowCount);
+
+            var name = new Label { Text = bar.Label, AutoSize = true, ForeColor = Theme.BarTrackText, Font = Theme.Font(9.5f), Anchor = AnchorStyles.Left, Margin = new Padding(0, 2, 10, 2) };
+            var barCell = new Panel { Dock = DockStyle.Fill, BackColor = Color.White, Margin = new Padding(0, 1, 0, 1) };
+            // A 0 value shows no bar at all; otherwise a 2px minimum keeps a small non-zero value visible.
+            var fill = new Panel { Height = 16, Width = bar.Count == 0 ? 0 : Math.Max(2, (int)Math.Round(bar.BarWidth)), BackColor = ParseAccent(bar.Accent), Anchor = AnchorStyles.Left };
+            barCell.Controls.Add(fill);
+            barCell.Resize += (_, _) => fill.Top = Math.Max(0, (barCell.Height - fill.Height) / 2);
+            var count = new Label { Text = bar.Count.ToString(), AutoSize = true, ForeColor = Theme.Muted, Font = Theme.Font(9f), Anchor = AnchorStyles.Left, Margin = new Padding(8, 2, 0, 2) };
+
+            panel.Controls.Add(name, 0, row);
+            panel.Controls.Add(barCell, 1, row);
+            panel.Controls.Add(count, 2, row);
+
+            if (drillable)
+            {
+                void Drill(object? s, EventArgs e) => _vm.DrillIntoCommand.Execute(bar.Label);
+                foreach (var cell in new Control[] { name, barCell, fill, count })
+                {
+                    cell.Cursor = Cursors.Hand;
+                    cell.Click += Drill;
+                }
+            }
             panel.RowCount++;
         }
         panel.ResumeLayout();
-    }
-
-    // One bar row laid out by a 3-column TableLayoutPanel: label (auto, aligned across rows), the
-    // coloured bar (its length is the pre-computed data width), and the count.
-    private Control MakeBarRow(BarItem bar, bool drillable)
-    {
-        var row = new TableLayoutPanel { Anchor = AnchorStyles.Left | AnchorStyles.Right, ColumnCount = 3, RowCount = 1, AutoSize = true, AutoSizeMode = AutoSizeMode.GrowAndShrink, BackColor = Color.White, Margin = new Padding(0, 1, 0, 1) };
-        row.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
-        row.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
-        row.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
-
-        var name = new Label { Text = bar.Label, AutoSize = true, ForeColor = Theme.BarTrackText, Font = Theme.Font(9.5f), Anchor = AnchorStyles.Left, Margin = new Padding(0, 0, 10, 0) };
-        var barCell = new Panel { Dock = DockStyle.Fill, BackColor = Color.White, Margin = new Padding(0) };
-        var fill = new Panel { Height = 16, Width = Math.Max(2, (int)Math.Round(bar.BarWidth)), BackColor = ParseAccent(bar.Accent), Anchor = AnchorStyles.Left };
-        barCell.Controls.Add(fill);
-        barCell.Resize += (_, _) => fill.Top = Math.Max(0, (barCell.Height - fill.Height) / 2);
-        var count = new Label { Text = bar.Count.ToString(), AutoSize = true, ForeColor = Theme.Muted, Font = Theme.Font(9f), Anchor = AnchorStyles.Left, Margin = new Padding(8, 0, 0, 0) };
-
-        row.Controls.Add(name, 0, 0);
-        row.Controls.Add(barCell, 1, 0);
-        row.Controls.Add(count, 2, 0);
-
-        if (drillable)
-        {
-            row.Cursor = Cursors.Hand;
-            void Drill(object? s, EventArgs e) => _vm.DrillIntoCommand.Execute(bar.Label);
-            row.Click += Drill;
-            name.Click += Drill;
-            barCell.Click += Drill;
-            fill.Click += Drill;
-            count.Click += Drill;
-        }
-        return row;
     }
 
     private static Color ParseAccent(string hex)
