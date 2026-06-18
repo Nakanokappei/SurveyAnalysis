@@ -46,7 +46,10 @@ public sealed class AnalyticsRepository
             .Where(f => f.FieldType == FieldType.Choice && f.Id > 0)
             .Select(f => (f.Id, f.Name))
             .ToList();
-        // Main topic / sentiment are left NULL until LLM analysis writes them; the raw value is not one.
+        // The primary 自由記述 field (first in design order) supplies fact_response.main_topic_key so the
+        // existing トピック別 slice keeps working; richer per-column topics live in fact_response_topic.
+        var primaryFreeTextFieldId = project.Fields
+            .FirstOrDefault(f => f.FieldType == FieldType.FreeText && f.Id > 0)?.Id;
 
         using var connection = _db.Open();
         using var transaction = connection.BeginTransaction();
@@ -59,6 +62,12 @@ public sealed class AnalyticsRepository
             clear.ExecuteNonQuery();
         }
 
+        // Project the persisted LLM analysis (raw → star): the topic dictionary into dim_topic, and the
+        // per-response sentiment / topic assignments which the fact rows reference below.
+        var topicKeyByTopicId = ProjectTopics(connection, transaction, project.Id);
+        var sentimentByResponse = LoadResponseSentiment(connection, transaction, project.Id);
+        var topicsByResponse = LoadResponseTopics(connection, transaction, project.Id);
+
         foreach (var (responseId, values) in ReadResponses(connection, transaction, project.Id))
         {
             long? dateKey = null;
@@ -69,7 +78,18 @@ public sealed class AnalyticsRepository
             if (regionField is not null && values.TryGetValue(regionField, out var regionValue) && !string.IsNullOrWhiteSpace(regionValue))
                 regionKey = GetOrCreateRegion(connection, transaction, regionValue.Trim());
 
-            var factId = InsertFact(connection, transaction, responseId, project.Id, dateKey, regionKey);
+            var sentiment = sentimentByResponse.GetValueOrDefault(responseId);
+            var assignments = topicsByResponse.GetValueOrDefault(responseId);
+
+            // main_topic_key = the primary 自由記述 column's assigned topic for this response, if any.
+            long? mainTopicKey = null;
+            if (primaryFreeTextFieldId is { } pf && assignments is not null
+                && assignments.TryGetValue(pf, out var primary) && primary.TopicId is { } primaryTopicId
+                && topicKeyByTopicId.TryGetValue(primaryTopicId, out var pk))
+                mainTopicKey = pk;
+
+            var factId = InsertFact(connection, transaction, responseId, project.Id, dateKey, regionKey,
+                sentiment.Score, sentiment.IsNegative, mainTopicKey);
 
             // Link each answered choice option to the fact through the bridge. A multi-select cell
             // ("A; B; C") is split into one bridge row per option, so each option is its own dimension
@@ -81,6 +101,14 @@ public sealed class AnalyticsRepository
                         var choiceKey = GetOrCreateChoice(connection, transaction, fieldId, option);
                         InsertFactChoice(connection, transaction, factId, choiceKey);
                     }
+
+            // Per 自由記述 column: its assigned topic + that column's sentiment, into the topic bridge.
+            if (assignments is not null)
+                foreach (var (fieldId, assignment) in assignments)
+                {
+                    long? topicKey = assignment.TopicId is { } tid && topicKeyByTopicId.TryGetValue(tid, out var tk) ? tk : null;
+                    InsertFactTopic(connection, transaction, factId, fieldId, topicKey, assignment.Score, assignment.IsNegative);
+                }
         }
 
         transaction.Commit();
@@ -524,23 +552,136 @@ public sealed class AnalyticsRepository
         return (long)insert.ExecuteScalar()!;
     }
 
-    // Inserts one fact and returns its id (needed to link its choice answers through the bridge). Main
-    // topic / sentiment are NULL until LLM analysis fills them.
+    // Inserts one fact and returns its id (needed to link its choice / topic answers through the bridges).
+    // Sentiment and main topic come from the persisted LLM analysis (NULL when a response is unanalysed).
     private static long InsertFact(SqliteConnection connection, SqliteTransaction transaction,
-        long responseId, long projectId, long? dateKey, long? regionKey)
+        long responseId, long projectId, long? dateKey, long? regionKey,
+        double? sentimentScore, int? isNegative, long? mainTopicKey)
     {
         using var command = connection.CreateCommand();
         command.Transaction = transaction;
         command.CommandText = """
             INSERT INTO fact_response (response_id, project_id, date_key, region_key, main_topic_key, sentiment_score, is_negative)
-            VALUES ($rid, $pid, $date, $region, NULL, NULL, NULL);
+            VALUES ($rid, $pid, $date, $region, $topic, $sent, $neg);
             SELECT last_insert_rowid();
             """;
         command.Parameters.AddWithValue("$rid", responseId);
         command.Parameters.AddWithValue("$pid", projectId);
         command.Parameters.AddWithValue("$date", (object?)dateKey ?? DBNull.Value);
         command.Parameters.AddWithValue("$region", (object?)regionKey ?? DBNull.Value);
+        command.Parameters.AddWithValue("$topic", (object?)mainTopicKey ?? DBNull.Value);
+        command.Parameters.AddWithValue("$sent", (object?)sentimentScore ?? DBNull.Value);
+        command.Parameters.AddWithValue("$neg", (object?)isNegative ?? DBNull.Value);
         return (long)command.ExecuteScalar()!;
+    }
+
+    // Links a fact to a 自由記述 column's assigned topic + that column's sentiment (one row per field).
+    private static void InsertFactTopic(SqliteConnection connection, SqliteTransaction transaction,
+        long factId, long fieldId, long? topicKey, double? sentimentScore, int? isNegative)
+    {
+        using var command = connection.CreateCommand();
+        command.Transaction = transaction;
+        command.CommandText = """
+            INSERT OR IGNORE INTO fact_response_topic (fact_id, field_id, topic_key, sentiment_score, is_negative)
+            VALUES ($fid, $field, $topic, $sent, $neg);
+            """;
+        command.Parameters.AddWithValue("$fid", factId);
+        command.Parameters.AddWithValue("$field", fieldId);
+        command.Parameters.AddWithValue("$topic", (object?)topicKey ?? DBNull.Value);
+        command.Parameters.AddWithValue("$sent", (object?)sentimentScore ?? DBNull.Value);
+        command.Parameters.AddWithValue("$neg", (object?)isNegative ?? DBNull.Value);
+        command.ExecuteNonQuery();
+    }
+
+    // Projects the field_topics dictionary into dim_topic (one row per (field, label)) and returns a map
+    // from field_topics.id to the dim_topic.topic_key so the fact bridges can reference the star key.
+    private static Dictionary<long, long> ProjectTopics(SqliteConnection connection, SqliteTransaction transaction, long projectId)
+    {
+        using var read = connection.CreateCommand();
+        read.Transaction = transaction;
+        read.CommandText = """
+            SELECT ft.id, ft.field_id, ft.label
+            FROM field_topics ft
+            JOIN fields f ON f.id = ft.field_id
+            WHERE f.project_id = $pid;
+            """;
+        read.Parameters.AddWithValue("$pid", projectId);
+
+        var rows = new List<(long TopicId, long FieldId, string Label)>();
+        using (var reader = read.ExecuteReader())
+            while (reader.Read())
+                rows.Add((reader.GetInt64(0), reader.GetInt64(1), reader.GetString(2)));
+
+        var map = new Dictionary<long, long>();
+        foreach (var (topicId, fieldId, label) in rows)
+            map[topicId] = GetOrCreateTopic(connection, transaction, fieldId, label);
+        return map;
+    }
+
+    // dim_topic is keyed by a surrogate id, deduped by (field_id, label).
+    private static long GetOrCreateTopic(SqliteConnection connection, SqliteTransaction transaction, long fieldId, string label)
+    {
+        using var insert = connection.CreateCommand();
+        insert.Transaction = transaction;
+        insert.CommandText = """
+            INSERT OR IGNORE INTO dim_topic (field_id, label) VALUES ($fid, $label);
+            SELECT topic_key FROM dim_topic WHERE field_id = $fid AND label = $label;
+            """;
+        insert.Parameters.AddWithValue("$fid", fieldId);
+        insert.Parameters.AddWithValue("$label", label);
+        return (long)insert.ExecuteScalar()!;
+    }
+
+    // The per-response row sentiment (response_sentiment), for this project's responses.
+    private static Dictionary<long, (double? Score, int? IsNegative)> LoadResponseSentiment(
+        SqliteConnection connection, SqliteTransaction transaction, long projectId)
+    {
+        using var command = connection.CreateCommand();
+        command.Transaction = transaction;
+        command.CommandText = """
+            SELECT rs.response_id, rs.score, rs.is_negative
+            FROM response_sentiment rs
+            JOIN responses r ON r.id = rs.response_id
+            WHERE r.project_id = $pid;
+            """;
+        command.Parameters.AddWithValue("$pid", projectId);
+
+        var map = new Dictionary<long, (double?, int?)>();
+        using var reader = command.ExecuteReader();
+        while (reader.Read())
+            map[reader.GetInt64(0)] = (
+                reader.IsDBNull(1) ? null : reader.GetDouble(1),
+                reader.IsDBNull(2) ? null : reader.GetInt32(2));
+        return map;
+    }
+
+    // The per-(response, 自由記述 field) topic assignment + sentiment (response_topic), grouped by response.
+    private static Dictionary<long, Dictionary<long, (long? TopicId, double? Score, int? IsNegative)>> LoadResponseTopics(
+        SqliteConnection connection, SqliteTransaction transaction, long projectId)
+    {
+        using var command = connection.CreateCommand();
+        command.Transaction = transaction;
+        command.CommandText = """
+            SELECT rt.response_id, rt.field_id, rt.topic_id, rt.score, rt.is_negative
+            FROM response_topic rt
+            JOIN responses r ON r.id = rt.response_id
+            WHERE r.project_id = $pid;
+            """;
+        command.Parameters.AddWithValue("$pid", projectId);
+
+        var map = new Dictionary<long, Dictionary<long, (long?, double?, int?)>>();
+        using var reader = command.ExecuteReader();
+        while (reader.Read())
+        {
+            var responseId = reader.GetInt64(0);
+            if (!map.TryGetValue(responseId, out var byField))
+                map[responseId] = byField = new Dictionary<long, (long?, double?, int?)>();
+            byField[reader.GetInt64(1)] = (
+                reader.IsDBNull(2) ? null : reader.GetInt64(2),
+                reader.IsDBNull(3) ? null : reader.GetDouble(3),
+                reader.IsDBNull(4) ? null : reader.GetInt32(4));
+        }
+        return map;
     }
 
     // Links a choice value to a fact (idempotent on the (fact, choice) pair).

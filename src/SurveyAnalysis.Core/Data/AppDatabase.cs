@@ -78,7 +78,7 @@ public sealed class AppDatabase
 
     // The raw schema version this build expects. Bump it and add a matching case to MigrationSql when
     // the raw tables change; the runner then carries existing databases forward one step at a time.
-    private const long CurrentRawVersion = 4;
+    private const long CurrentRawVersion = 5;
 
     // Migrates the raw tables to CurrentRawVersion, using PRAGMA user_version (stored in the database
     // header) as the on-disk marker. Each step runs in its own transaction and advances the version,
@@ -117,6 +117,7 @@ public sealed class AppDatabase
         2 => V2SourcePathSql,
         3 => V3UniqueNamesSql,
         4 => V4DescriptionTopicsSql,
+        5 => V5AnalysisResultsSql,
         _ => throw new InvalidOperationException($"No migration defined for raw schema version {version}."),
     };
 
@@ -222,6 +223,30 @@ public sealed class AppDatabase
         CREATE INDEX idx_field_topics_field ON field_topics(field_id);
         """;
 
+    // v4 → v5: persist the import-time LLM analysis (raw, source of truth; the derived star is projected
+    // from it on Rebuild, which never calls the LLM). response_sentiment is the row-level sentiment over
+    // all 自由記述 of a response (the fact measure); response_topic is, per 自由記述 column, the assigned
+    // topic and that text's sentiment (the dimension). topic_id → field_topics, nulled if a topic is
+    // deleted; the row keeps its sentiment.
+    private const string V5AnalysisResultsSql = """
+        CREATE TABLE response_sentiment (
+            response_id  INTEGER PRIMARY KEY REFERENCES responses(id) ON DELETE CASCADE,
+            score        REAL,
+            is_negative  INTEGER
+        );
+
+        CREATE TABLE response_topic (
+            response_id  INTEGER NOT NULL REFERENCES responses(id) ON DELETE CASCADE,
+            field_id     INTEGER NOT NULL REFERENCES fields(id) ON DELETE CASCADE,
+            topic_id     INTEGER REFERENCES field_topics(id) ON DELETE SET NULL,
+            score        REAL,
+            is_negative  INTEGER,
+            PRIMARY KEY (response_id, field_id)
+        );
+
+        CREATE INDEX idx_response_topic_field ON response_topic(field_id);
+        """;
+
     // Analytics star schema, derived from responses/answers by ETL (AnalyticsRepository). One
     // fact_response row per response, with foreign keys to its dimensions and the sentiment measures;
     // a dimension the response lacks (no region field, topic before LLM) is NULL. Multi-valued choice
@@ -232,6 +257,7 @@ public sealed class AppDatabase
     // April-start (年度). The whole star is dropped + recreated on startup since it is rebuilt on demand.
     private const string DerivedSchemaSql = """
         DROP TABLE IF EXISTS fact_response_choice;
+        DROP TABLE IF EXISTS fact_response_topic;
         DROP TABLE IF EXISTS fact_response;
         DROP TABLE IF EXISTS dim_choice;
         DROP TABLE IF EXISTS dim_date;
@@ -265,9 +291,13 @@ public sealed class AppDatabase
             city        TEXT NOT NULL           -- 市区町村 ('' if absent)
         );
 
+        -- One topic per (自由記述 field, label), projected from the field_topics dictionary. Scoped to a
+        -- field so the same label can exist under different columns (like dim_choice).
         CREATE TABLE dim_topic (
             topic_key  INTEGER PRIMARY KEY AUTOINCREMENT,
-            label      TEXT NOT NULL UNIQUE
+            field_id   INTEGER NOT NULL REFERENCES fields(id) ON DELETE CASCADE,
+            label      TEXT NOT NULL,
+            UNIQUE(field_id, label)
         );
 
         -- One distinct 選択肢 value per (field, value). field_id ties it to the project's field, so the
@@ -285,8 +315,8 @@ public sealed class AppDatabase
             project_id       INTEGER NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
             date_key         INTEGER REFERENCES dim_date(date_key),
             region_key       INTEGER REFERENCES dim_region(region_key),
-            main_topic_key   INTEGER REFERENCES dim_topic(topic_key),   -- メイントピック (LLM 前は NULL)
-            sentiment_score  REAL,                                       -- メイントピックの感情極性 (LLM 前は NULL)
+            main_topic_key   INTEGER REFERENCES dim_topic(topic_key),   -- 主 自由記述列のトピック (未解析は NULL)
+            sentiment_score  REAL,                                       -- 行全体の感情極性 (未解析は NULL)
             is_negative      INTEGER
         );
 
@@ -297,9 +327,21 @@ public sealed class AppDatabase
             PRIMARY KEY (fact_id, choice_key)
         );
 
+        -- Bridge: per 自由記述 column, the response's assigned topic and that column's sentiment. A
+        -- response can have several 自由記述 columns, so it is one row per (fact, field).
+        CREATE TABLE fact_response_topic (
+            fact_id          INTEGER NOT NULL REFERENCES fact_response(fact_id) ON DELETE CASCADE,
+            field_id         INTEGER NOT NULL,
+            topic_key        INTEGER REFERENCES dim_topic(topic_key) ON DELETE CASCADE,
+            sentiment_score  REAL,
+            is_negative      INTEGER,
+            PRIMARY KEY (fact_id, field_id)
+        );
+
         CREATE INDEX idx_fact_project ON fact_response(project_id);
         CREATE INDEX idx_fact_date    ON fact_response(date_key);
         CREATE INDEX idx_fact_region  ON fact_response(region_key);
         CREATE INDEX idx_frc_choice   ON fact_response_choice(choice_key);
+        CREATE INDEX idx_frt_topic    ON fact_response_topic(topic_key);
         """;
 }
