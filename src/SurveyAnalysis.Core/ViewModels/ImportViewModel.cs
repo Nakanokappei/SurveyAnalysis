@@ -63,7 +63,8 @@ public partial class ImportViewModel : ViewModelBase
         _responses = responses;
         _analytics = analytics;
 
-        // 対応づけ候補は「取り込まない」＋プロジェクトの項目名。自動マッピングはしない（誤割り当て防止）。
+        // 対応づけ候補は「取り込まない」＋プロジェクトの項目名。読み込み時に列名一致で自動割り当てし
+        // （AutoMapColumnsByName）、一致しない列はホストが LLM で補う。
         MappingOptions = new ObservableCollection<string> { NoMapping };
         foreach (var field in project.Fields)
             if (!string.IsNullOrWhiteSpace(field.Name) && !MappingOptions.Contains(field.Name))
@@ -101,6 +102,10 @@ public partial class ImportViewModel : ViewModelBase
         SelectedFile = fileName;
         CurrentIndex = 0;
         UpdateValues();
+
+        // Pre-assign each column whose name exactly matches a project field; the rest stay blank for the
+        // host's LLM pass / the user.
+        AutoMapColumnsByName();
 
         StatusMessage = csv.Rows.Count == 0
             ? "このCSVには取り込める行がありませんでした。"
@@ -156,20 +161,35 @@ public partial class ImportViewModel : ViewModelBase
     // 行があり、すべての列で取り込み先が選ばれている（未選択が1つも無い）ときだけマージ可能。
     private bool CanMerge() => _rows.Count > 0 && Columns.Count > 0 && Columns.All(c => c.SelectedMapping is not null);
 
-    // マージ：対応づけを各行に適用して回答(responses)を保存し、件数を表示する。
+    // マージ：対応づけを各行に適用して回答(responses)を保存し、件数を表示する。CSV列と取り込み先は原則
+    // 1：1。ただし取り込み先が選択肢型のときに限り、複数列を「; 」区切りの複数選択にまとめられる。
     [RelayCommand(CanExecute = nameof(CanMerge))]
     private void Merge()
     {
+        var groups = MappedGroups();
+
+        // Enforce 1:1 for every non-選択肢 target — only a 選択肢 field may collect more than one column.
+        var offending = groups.FirstOrDefault(g => !g.IsChoice && g.Indices.Count > 1);
+        if (offending.Field is not null)
+        {
+            StatusMessage = $"「{offending.Field}」に複数の列が割り当てられています。選択肢型以外の項目は1列だけ対応づけできます。";
+            return;
+        }
+
         var responses = new List<SurveyResponse>();
         foreach (var row in _rows)
         {
             var answers = new List<FieldAnswer>();
-            for (var i = 0; i < Columns.Count; i++)
+            foreach (var group in groups)
             {
-                var mapping = Columns[i].SelectedMapping;
-                if (mapping is null || mapping == NoMapping)
-                    continue;
-                answers.Add(new FieldAnswer(mapping, i < row.Length ? row[i] : ""));
+                var values = group.Indices
+                    .Select(i => i < row.Length ? row[i] : "")
+                    .Where(v => !string.IsNullOrWhiteSpace(v))
+                    .Select(v => v.Trim());
+                // 選択肢: merge the columns into one "; "-joined multi-select; otherwise the single column.
+                var value = group.IsChoice ? string.Join("; ", values) : values.FirstOrDefault() ?? "";
+                if (value.Length > 0)
+                    answers.Add(new FieldAnswer(group.Field, value));
             }
             if (answers.Count > 0)
                 responses.Add(new SurveyResponse { Answers = answers });
@@ -195,6 +215,103 @@ public partial class ImportViewModel : ViewModelBase
         // and re-project, mirroring the CSV-create flow.
         Merged?.Invoke(_project);
     }
+
+    // The mapped columns grouped by target field (in first-seen order), each carrying its CSV column
+    // indices and whether the target is a 選択肢 field (the only type allowed to gather several columns).
+    private List<(string Field, List<int> Indices, bool IsChoice)> MappedGroups()
+    {
+        var byField = new Dictionary<string, (List<int> Indices, bool IsChoice)>();
+        var order = new List<string>();
+        for (var i = 0; i < Columns.Count; i++)
+        {
+            var mapping = Columns[i].SelectedMapping;
+            if (mapping is null || mapping == NoMapping)
+                continue;
+            if (!byField.TryGetValue(mapping, out var entry))
+            {
+                var field = _project.Fields.FirstOrDefault(f => f.Name == mapping);
+                byField[mapping] = entry = (new List<int>(), field?.FieldType == FieldType.Choice);
+                order.Add(mapping);
+            }
+            entry.Indices.Add(i);
+        }
+        return order.Select(field => (field, byField[field].Indices, byField[field].IsChoice)).ToList();
+    }
+
+    // Auto-assigns each CSV column to the project field with the exact same name (a 1:1 mapping; a
+    // non-選択肢 field is matched at most once). Columns with no name match are left blank for the LLM
+    // pass / the user. Called on load.
+    private void AutoMapColumnsByName()
+    {
+        var takenNonChoice = new HashSet<string>();
+        foreach (var column in Columns)
+        {
+            var field = _project.Fields.FirstOrDefault(f => f.Name == column.Name && !string.IsNullOrWhiteSpace(f.Name));
+            if (field is not null)
+                TryAssign(column, field.Name, takenNonChoice);
+        }
+    }
+
+    // Applies host-provided (LLM) suggestions to the columns still blank, respecting 1:1 (a non-選択肢
+    // field already taken is skipped). Called by the import dialog after its LLM mapping pass.
+    public void ApplyMappingSuggestions(IReadOnlyDictionary<string, string> columnToField)
+    {
+        var takenNonChoice = TakenNonChoiceFields();
+        foreach (var column in Columns)
+            if (column.SelectedMapping is null && columnToField.TryGetValue(column.Name, out var fieldName))
+                TryAssign(column, fieldName, takenNonChoice);
+        MergeCommand.NotifyCanExecuteChanged();
+    }
+
+    // Assigns a column to a field unless that would break 1:1 (a non-選択肢 field already mapped). 選択肢
+    // fields may be the target of several columns (merged at import).
+    private void TryAssign(ImportColumn column, string fieldName, HashSet<string> takenNonChoice)
+    {
+        var field = _project.Fields.FirstOrDefault(f => f.Name == fieldName);
+        if (field is null)
+            return;
+        var isChoice = field.FieldType == FieldType.Choice;
+        if (!isChoice && !takenNonChoice.Add(fieldName))
+            return;   // a non-選択肢 field is already taken — keep it 1:1
+        column.SelectedMapping = fieldName;
+    }
+
+    // The non-選択肢 fields already mapped by some column (so a later assignment keeps 1:1).
+    private HashSet<string> TakenNonChoiceFields()
+    {
+        var taken = new HashSet<string>();
+        foreach (var column in Columns)
+            if (column.SelectedMapping is { } mapping && mapping != NoMapping)
+            {
+                var field = _project.Fields.FirstOrDefault(f => f.Name == mapping);
+                if (field is not null && field.FieldType != FieldType.Choice)
+                    taken.Add(mapping);
+            }
+        return taken;
+    }
+
+    // A few distinct non-empty sample values for a column (by name), for the LLM mapping prompt.
+    public IReadOnlyList<string> SampleValuesFor(string columnName)
+    {
+        var index = -1;
+        for (var i = 0; i < Columns.Count; i++)
+            if (Columns[i].Name == columnName) { index = i; break; }
+        if (index < 0)
+            return Array.Empty<string>();
+        return _rows
+            .Select(row => index < row.Length ? row[index] : "")
+            .Where(value => !string.IsNullOrWhiteSpace(value))
+            .Distinct()
+            .Take(5)
+            .ToList();
+    }
+
+    // The project's fields offered as mapping targets (name + Japanese type label), for the LLM prompt.
+    public IReadOnlyList<(string Name, string TypeLabel)> TargetFields =>
+        _project.Fields
+            .Where(f => !string.IsNullOrWhiteSpace(f.Name))
+            .Select(f => (f.Name, FieldTypeInfo.Label(f.FieldType)))
+            .ToList();
 
     // CSVの1列：列名、プロジェクト項目への対応（ドロップダウン選択）、現在行の値。
     // 列インスタンスは読み込み中は固定なので、行移動しても対応づけ（SelectedMapping）は保持される。

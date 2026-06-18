@@ -3,6 +3,8 @@ using System.Collections.ObjectModel;
 using System.ComponentModel;
 using System.Drawing;
 using System.IO;
+using System.Linq;
+using System.Threading.Tasks;
 using System.Windows.Forms;
 using SurveyAnalysis.Llm.Consumers;
 using SurveyAnalysis.Models;
@@ -204,14 +206,41 @@ internal sealed class ImportForm : Form
         UseWaitCursor = true;
         try
         {
-            await _vm.LoadCsvAsync(bytes, fileName);
+            await _vm.LoadCsvAsync(bytes, fileName);   // exact-name auto-mapping happens inside
+            RebuildColumns();
+            await RefineMappingWithLlm();               // LLM-map any columns left blank
         }
         finally
         {
             UseWaitCursor = false;
             _select.Enabled = true;
         }
-        RebuildColumns();
+    }
+
+    // After loading, ask the LLM to map any columns the exact-name pass left blank, using their sample
+    // values and the project's fields. Skipped silently with no API key; any failure leaves those columns
+    // blank for the user. Auto-mapped columns are never overwritten, and the 1:1 / 選択肢 rule is applied
+    // by the view model when the suggestions are merged in.
+    private async Task RefineMappingWithLlm()
+    {
+        var settings = new SettingsViewModel(AppServices.Settings);
+        if (string.IsNullOrWhiteSpace(settings.ApiKey))
+            return;
+        var unmapped = _vm.Columns.Where(c => c.SelectedMapping is null).Select(c => c.Name).ToList();
+        if (unmapped.Count == 0)
+            return;
+        try
+        {
+            var columns = unmapped.Select(name => (Column: name, Samples: _vm.SampleValuesFor(name))).ToList();
+            var mapper = new LlmColumnMapper(AppServices.Llm, settings.TopicModel);
+            var suggestions = await mapper.MapAsync(columns, _vm.TargetFields);
+            _vm.ApplyMappingSuggestions(suggestions);
+            RebuildColumns();
+        }
+        catch
+        {
+            // Keep the name-based mapping on any failure (offline, bad key, unparseable reply).
+        }
     }
 
     // ===== Reactive =====

@@ -203,35 +203,37 @@ internal sealed class ProjectDesignForm : Form
 
     // ===== トピック タブ =====
 
-    // Left = the project's 自由記述 columns with the "再構築" (clustering) button beneath them; right = the
-    // selected column's topic dictionary as a row list (each row: label / ✏ rename / 削除) with a full-width
-    // 追加 button beneath it. Both list areas share the same Percent row so they are the same height. Topics
-    // are managed live against the database and only for saved columns (a column gains an id once saved).
+    // Two panes that fill the tab, then the 再構築 button beneath the left pane. Left pane = the 自由記述
+    // columns list; right pane = the selected column's topic dictionary as a row list (label / ✏ rename /
+    // 削除) with a full-width 追加 button at its foot. Because both lists fill to the same pane bottom, the
+    // 追加 button's bottom lines up with the 自由記述列 listbox's bottom; the 再構築 button sits below that,
+    // under the left pane. Topics are managed live against the database and only for saved columns.
     private TabPage BuildTopicsTab()
     {
         var page = new TabPage("トピック") { BackColor = ColorTranslator.FromHtml("#F8FAFC"), UseVisualStyleBackColor = false, Padding = new Padding(16) };
 
-        var layout = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 2, RowCount = 1, BackColor = ColorTranslator.FromHtml("#F8FAFC") };
-        layout.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, LogicalToDeviceUnits(250)));  // wide enough for the 再構築 label
-        layout.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
-        layout.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
+        var outer = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 1, RowCount = 2, BackColor = ColorTranslator.FromHtml("#F8FAFC") };
+        outer.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
+        outer.RowStyles.Add(new RowStyle(SizeType.Percent, 100));   // the two panes
+        outer.RowStyles.Add(new RowStyle(SizeType.AutoSize));        // 再構築 button row
 
-        // Left column: heading, the 自由記述 column list, then the 再構築 button (full width, under the list).
-        var left = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 1, RowCount = 3, BackColor = ColorTranslator.FromHtml("#F8FAFC"), Margin = new Padding(0, 0, 12, 0) };
+        var panes = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 2, RowCount = 1, BackColor = ColorTranslator.FromHtml("#F8FAFC") };
+        panes.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, LogicalToDeviceUnits(250)));  // wide enough for the 再構築 label below
+        panes.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
+        panes.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
+
+        // Left pane: heading + the 自由記述 column list (the listbox fills to the pane bottom).
+        var left = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 1, RowCount = 2, BackColor = ColorTranslator.FromHtml("#F8FAFC"), Margin = new Padding(0, 0, 12, 0) };
         left.RowStyles.Add(new RowStyle(SizeType.AutoSize));
         left.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
-        left.RowStyles.Add(new RowStyle(SizeType.AutoSize));
         left.Controls.Add(TopicPaneCaption("自由記述の列"), 0, 0);
         _topicColumns = new ListBox { Dock = DockStyle.Fill, Font = Theme.Font(9.5f), IntegralHeight = false, BorderStyle = BorderStyle.FixedSingle };
         _topicColumns.SelectedIndexChanged += (_, _) => OnTopicColumnSelected();
         left.Controls.Add(_topicColumns, 0, 1);
-        _topicRebuild = FullWidthButton("✨", "既存データからトピックを再構築", Theme.Accent);
-        _topicRebuild.FlatAppearance.BorderColor = Theme.Accent;
-        _topicRebuild.Click += (_, _) => RebuildTopics();
-        left.Controls.Add(_topicRebuild, 0, 2);
-        layout.Controls.Add(left, 0, 0);
+        panes.Controls.Add(left, 0, 0);
 
-        // Right column: caption, the topic row list (scrolls), then a full-width 追加 button beneath it.
+        // Right pane: caption, the topic row list (scrolls), then a full-width 追加 button. The button is the
+        // pane's bottom row, so its bottom edge lands level with the left listbox's bottom.
         var right = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 1, RowCount = 3, BackColor = ColorTranslator.FromHtml("#F8FAFC") };
         right.RowStyles.Add(new RowStyle(SizeType.AutoSize));
         right.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
@@ -253,8 +255,23 @@ internal sealed class ProjectDesignForm : Form
         _topicAdd.Click += (_, _) => AddTopic();
         right.Controls.Add(_topicAdd, 0, 2);
 
-        layout.Controls.Add(right, 1, 0);
-        page.Controls.Add(layout);
+        panes.Controls.Add(right, 1, 0);
+        outer.Controls.Add(panes, 0, 0);
+
+        // 再構築 button under the left pane: a 2-column row so the button sits in the same 250-wide left band,
+        // inset 12px on the right to line up with the listbox above it (the rest of the row is empty).
+        var rebuildRow = new TableLayoutPanel { ColumnCount = 2, RowCount = 1, AutoSize = true, AutoSizeMode = AutoSizeMode.GrowAndShrink, Anchor = AnchorStyles.Left | AnchorStyles.Right, BackColor = ColorTranslator.FromHtml("#F8FAFC") };
+        rebuildRow.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, LogicalToDeviceUnits(250)));
+        rebuildRow.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
+        rebuildRow.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+        _topicRebuild = FullWidthButton("✨", "既存データからトピックを再構築", Theme.Accent);
+        _topicRebuild.Margin = new Padding(0, 8, 12, 0);
+        _topicRebuild.FlatAppearance.BorderColor = Theme.Accent;
+        _topicRebuild.Click += (_, _) => RebuildTopics();
+        rebuildRow.Controls.Add(_topicRebuild, 0, 0);
+        outer.Controls.Add(rebuildRow, 0, 1);
+
+        page.Controls.Add(outer);
         return page;
     }
 
@@ -374,7 +391,7 @@ internal sealed class ProjectDesignForm : Form
 
         var label = new Label { Text = topic.Label, AutoSize = true, ForeColor = Theme.TitleText, Font = Theme.Font(9.5f), Anchor = AnchorStyles.Left, Margin = new Padding(0, 0, 8, 0) };
 
-        var rename = new IconButton { Glyph = Icons.Edit.Glyph, IconFontName = Icons.Edit.Font, IconSize = 9f, AutoSize = true, BackColor = Color.White, ForeColor = Theme.Muted, Font = Theme.Font(9f), Cursor = Cursors.Hand, Anchor = AnchorStyles.None, Margin = new Padding(0, 0, 6, 0), Padding = new Padding(7, 2, 7, 2) };
+        var rename = new IconButton { Glyph = Icons.Edit.Glyph, IconFontName = Icons.Edit.Font, Text = "トピック名の変更", IconSize = 9f, AutoSize = true, BackColor = Color.White, ForeColor = Theme.BodyText, Font = Theme.Font(9f), Cursor = Cursors.Hand, Anchor = AnchorStyles.None, Margin = new Padding(0, 0, 6, 0), Padding = new Padding(8, 3, 8, 3) };
         rename.FlatAppearance.BorderColor = Theme.CardBorder;
         rename.Click += (_, _) => RenameTopic(topic);
 
@@ -512,15 +529,38 @@ internal sealed class ProjectDesignForm : Form
     }
 
     // A minimal single-line text prompt (WinForms has no built-in InputBox). Returns the trimmed text, or
-    // null on cancel / empty.
+    // null on cancel / empty. Built from layout containers with AutoSize buttons (and the app's DPI auto-
+    // scale), so the OK / キャンセル text is never clipped on a high-DPI display.
     private string? PromptForText(string title, string label, string initial)
     {
-        using var form = new Form { Text = title, FormBorderStyle = FormBorderStyle.FixedDialog, StartPosition = FormStartPosition.CenterParent, MaximizeBox = false, MinimizeBox = false, ClientSize = new Size(LogicalToDeviceUnits(360), LogicalToDeviceUnits(120)), Font = Theme.Font() };
-        var caption = new Label { Text = label, AutoSize = true, Location = new Point(LogicalToDeviceUnits(14), LogicalToDeviceUnits(14)) };
-        var box = new TextBox { Text = initial, Location = new Point(LogicalToDeviceUnits(14), LogicalToDeviceUnits(38)), Width = LogicalToDeviceUnits(332), Font = Theme.Font(10f) };
-        var ok = new Button { Text = "OK", DialogResult = DialogResult.OK, Location = new Point(LogicalToDeviceUnits(190), LogicalToDeviceUnits(80)), Width = LogicalToDeviceUnits(75) };
-        var cancel = new Button { Text = "キャンセル", DialogResult = DialogResult.Cancel, Location = new Point(LogicalToDeviceUnits(271), LogicalToDeviceUnits(80)), Width = LogicalToDeviceUnits(75) };
-        form.Controls.AddRange(new Control[] { caption, box, ok, cancel });
+        using var form = new Form
+        {
+            Text = title, FormBorderStyle = FormBorderStyle.FixedDialog, StartPosition = FormStartPosition.CenterParent,
+            MaximizeBox = false, MinimizeBox = false, ShowInTaskbar = false, Font = Theme.Font(),
+            AutoScaleMode = AutoScaleMode.Dpi, AutoScaleDimensions = new SizeF(96F, 96F),
+            BackColor = ColorTranslator.FromHtml("#F8FAFC"),
+            ClientSize = new Size(LogicalToDeviceUnits(360), LogicalToDeviceUnits(150)),
+        };
+
+        var box = new TextBox { Text = initial, Font = Theme.Font(10f), Anchor = AnchorStyles.Left | AnchorStyles.Right, Margin = new Padding(0, 2, 0, 0) };
+
+        var content = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 1, RowCount = 2, Padding = new Padding(16, 16, 16, 0), BackColor = ColorTranslator.FromHtml("#F8FAFC") };
+        content.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
+        content.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+        content.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+        content.Controls.Add(new Label { Text = label, AutoSize = true, ForeColor = Theme.BodyText, Anchor = AnchorStyles.Left, Margin = new Padding(0, 0, 0, 4) }, 0, 0);
+        content.Controls.Add(box, 0, 1);
+
+        var ok = new Button { Text = "OK", DialogResult = DialogResult.OK, AutoSize = true, AutoSizeMode = AutoSizeMode.GrowAndShrink, FlatStyle = FlatStyle.Flat, BackColor = Theme.Accent, ForeColor = Color.White, Font = Theme.Font(9.5f, FontStyle.Bold), Padding = new Padding(16, 6, 16, 6), Margin = new Padding(8, 0, 0, 0), Cursor = Cursors.Hand };
+        ok.FlatAppearance.BorderSize = 0;
+        var cancel = new Button { Text = "キャンセル", DialogResult = DialogResult.Cancel, AutoSize = true, AutoSizeMode = AutoSizeMode.GrowAndShrink, FlatStyle = FlatStyle.Flat, BackColor = Color.White, ForeColor = Theme.BodyText, Font = Theme.Font(9.5f), Padding = new Padding(12, 6, 12, 6), Margin = new Padding(0), Cursor = Cursors.Hand };
+        cancel.FlatAppearance.BorderColor = Theme.CardBorder;
+        var buttons = new FlowLayoutPanel { Dock = DockStyle.Bottom, FlowDirection = FlowDirection.RightToLeft, WrapContents = false, AutoSize = true, AutoSizeMode = AutoSizeMode.GrowAndShrink, BackColor = ColorTranslator.FromHtml("#F8FAFC"), Padding = new Padding(16, 8, 16, 12) };
+        buttons.Controls.Add(ok);
+        buttons.Controls.Add(cancel);
+
+        form.Controls.Add(content);  // Fill — add first so it yields the bottom strip
+        form.Controls.Add(buttons);  // Bottom
         form.AcceptButton = ok;
         form.CancelButton = cancel;
         return form.ShowDialog(this) == DialogResult.OK && box.Text.Trim().Length > 0 ? box.Text.Trim() : null;

@@ -279,8 +279,11 @@ public sealed class MainForm : Form
         {
             AddRow(bottom, NavButton(Icons.Add, "インポート (CSV)", () => _shell.ImportCommand.Execute(null)));
             AddRow(bottom, NavButton(Icons.Export, "エクスポート", OnExportNotImplemented));
-            AddRow(bottom, Divider());
-            AddRow(bottom, NavButton(Icons.Close, "プロジェクトを閉じる", OnCloseProject));
+            // 閉じる is a project action too, so no divider line above it — but it is set apart from the
+            // import/export pair by extra spacing (a wider top margin) so it still reads as distinct.
+            var close = NavButton(Icons.Close, "プロジェクトを閉じる", OnCloseProject);
+            close.Margin = new Padding(close.Margin.Left, LogicalToDeviceUnits(20), close.Margin.Right, close.Margin.Bottom);
+            AddRow(bottom, close);
             AddRow(bottom, Divider());   // set 設定 off from the project actions above it
         }
         AddRow(bottom, NavButton(Icons.Settings, "設定", OnSettings));
