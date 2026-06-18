@@ -1,4 +1,5 @@
 using System;
+using System.Linq;
 using SurveyAnalysis.Data;
 using SurveyAnalysis.Models;
 using SurveyAnalysis.ViewModels;
@@ -76,5 +77,78 @@ public class DashboardViewModelTests
         Assert.Equal(0, vm.TotalResponses);
         Assert.True(vm.HasNoResponses);
         Assert.Empty(vm.Rows);
+    }
+
+    [Fact]
+    public void Real_project_shows_real_sentiment_and_topics_once_analysed()
+    {
+        using var temp = new TempDatabase();
+        var projects = new ProjectRepository(temp.Db);
+        var responses = new ResponseRepository(temp.Db);
+        var topics = new TopicRepository(temp.Db);
+        var results = new AnalysisResultsRepository(temp.Db);
+        var analytics = new AnalyticsRepository(temp.Db);
+
+        var project = new Project { Name = "工事アンケート" };
+        project.Fields.Add(new DataField { Name = "記入日", FieldType = FieldType.Date, UseForAggregation = true });
+        var freeText = new DataField { Name = "ご意見", FieldType = FieldType.FreeText, Analysis = AnalysisMethod.Sentiment };
+        project.Fields.Add(freeText);
+        var pid = projects.Insert(project);
+
+        responses.InsertResponses(pid, "t.csv", new[]
+        {
+            Response(("記入日", "2026/05/20"), ("ご意見", "丁寧で良かった。")),
+            Response(("記入日", "2026/05/21"), ("ご意見", "配線が雑だった。")),
+            Response(("記入日", "2026/05/22"), ("ご意見", "普通でした。")),
+        });
+
+        // Persisted analysis: two topics, a row sentiment + topic assignment per response.
+        var 対応 = topics.AddTopic(freeText.Id, "対応");
+        var 工事 = topics.AddTopic(freeText.Id, "工事");
+        var ids = ResponseIds(temp);
+        results.SaveRowSentiment(ids[0], 0.8, isNegative: false);
+        results.SaveTopicAssignment(ids[0], freeText.Id, 対応, 0.8, isNegative: false);
+        results.SaveRowSentiment(ids[1], -0.6, isNegative: true);
+        results.SaveTopicAssignment(ids[1], freeText.Id, 工事, -0.6, isNegative: true);
+        results.SaveRowSentiment(ids[2], 0.1, isNegative: false);
+        results.SaveTopicAssignment(ids[2], freeText.Id, 対応, 0.1, isNegative: false);
+
+        var vm = new DashboardViewModel(projects.Load(pid)!, analytics);
+        vm.SetRange(DateRangePreset.Custom, new DateTime(2026, 5, 1), new DateTime(2026, 5, 31));
+
+        // Analysis is present, so the real KPIs/charts show.
+        Assert.False(vm.AnalysisPending);
+        Assert.Equal(3, vm.TotalResponses);
+        Assert.Equal("1", vm.NegativeDisplay);                 // one is_negative response
+        Assert.Equal("+0.10", vm.AverageSentiment);            // (0.8 - 0.6 + 0.1) / 3
+
+        // Topic bars: 対応 ×2 (largest first), 工事 ×1.
+        Assert.Equal(2, vm.TopicBars.Count);
+        Assert.Equal("対応", vm.TopicBars[0].Label);
+        Assert.Equal(2, vm.TopicBars[0].Count);
+        Assert.Equal("工事", vm.TopicBars[1].Label);
+
+        // Sentiment distribution: ポジティブ 1 (0.8), 中立 1 (0.1), ネガティブ 1 (flagged).
+        Assert.Equal(new[] { "ポジティブ", "中立", "ネガティブ" }, vm.SentimentBars.Select(b => b.Label).ToArray());
+        Assert.Equal(new[] { 1, 1, 1 }, vm.SentimentBars.Select(b => b.Count).ToArray());
+
+        // Rows (newest id first) carry the real topic + sentiment score.
+        Assert.Equal("普通でした。", vm.Rows[0].Excerpt);
+        Assert.Equal("対応", vm.Rows[0].Topic);
+        Assert.Equal("+0.10", vm.Rows[0].Sentiment);
+        Assert.Equal("-0.60", vm.Rows[1].Sentiment);           // the negative response
+    }
+
+    // The response ids for the single project under test, in insert order.
+    private static long[] ResponseIds(TempDatabase temp)
+    {
+        using var connection = temp.Db.Open();
+        using var command = connection.CreateCommand();
+        command.CommandText = "SELECT id FROM responses ORDER BY id;";
+        var ids = new System.Collections.Generic.List<long>();
+        using var reader = command.ExecuteReader();
+        while (reader.Read())
+            ids.Add(reader.GetInt64(0));
+        return ids.ToArray();
     }
 }

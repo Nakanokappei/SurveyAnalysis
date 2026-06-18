@@ -7,6 +7,15 @@ using SurveyAnalysis.Models;
 
 namespace SurveyAnalysis.Data;
 
+// One response within a dashboard scope plus its persisted analysis: the answer values (for 記入日 /
+// 抜粋 — PII is in the map but the view never shows it), the row sentiment score and negative flag, and
+// the main topic label (null when unanalysed). The dashboard reads these straight from the star.
+public sealed record ResponseAnalysis(
+    IReadOnlyDictionary<string, string> Values,
+    double? SentimentScore,
+    bool IsNegative,
+    string? Topic);
+
 // Builds and queries the analytics star schema. Rebuild performs the ETL: it reads a project's raw
 // responses/answers, resolves each response's date / region / topic dimension members, and writes
 // one fact_response row per response. AggregateBy answers a slice query (group the facts by one
@@ -137,6 +146,58 @@ public sealed class AnalyticsRepository
             ORDER BY r.id {order};
             """;
         return ReadResponseMaps(command);
+    }
+
+    // Like ResponsesForScope but each response also carries its persisted analysis — the row sentiment
+    // (fact_response.sentiment_score / is_negative) and its main topic label (via main_topic_key →
+    // dim_topic). The dashboard uses this to show real KPIs, the topic / sentiment charts, and the per-
+    // response 感情 / トピック columns from the same star the slices read. Always scoped to the root
+    // (no drill) within the 集計期間 window.
+    public IReadOnlyList<ResponseAnalysis> ResponsesWithAnalysisForScope(
+        long projectId, long? fromKey, long? toKey, bool newestFirst = false)
+    {
+        using var connection = _db.Open();
+        using var command = connection.CreateCommand();
+        command.Parameters.AddWithValue("$pid", projectId);
+        var where = ScopeWhere(TimeScope.Root, fromKey, toKey, command);
+        var order = newestFirst ? "DESC" : "ASC";
+        command.CommandText = $"""
+            SELECT r.id, f.sentiment_score AS sscore, f.is_negative AS sneg, t.label AS topic,
+                   fl.name AS fname, a.value AS val
+            FROM fact_response f
+            JOIN dim_date d ON f.date_key = d.date_key
+            JOIN responses r ON r.id = f.response_id
+            LEFT JOIN dim_topic t ON f.main_topic_key = t.topic_key
+            LEFT JOIN answers a ON a.response_id = r.id
+            LEFT JOIN fields fl ON fl.id = a.field_id
+            WHERE {where}
+            ORDER BY r.id {order};
+            """;
+
+        // Group the joined rows by response: the first row fixes its (constant) analysis, the rest
+        // accumulate its answer values into the field-name→value map.
+        var values = new Dictionary<long, Dictionary<string, string>>();
+        var analysis = new Dictionary<long, (double? Score, bool IsNegative, string? Topic)>();
+        var order2 = new List<long>();
+        using var reader = command.ExecuteReader();
+        while (reader.Read())
+        {
+            var id = reader.GetInt64(0);
+            if (!values.TryGetValue(id, out var map))
+            {
+                values[id] = map = new Dictionary<string, string>();
+                analysis[id] = (
+                    reader.IsDBNull(1) ? null : reader.GetDouble(1),
+                    !reader.IsDBNull(2) && reader.GetInt32(2) != 0,
+                    reader.IsDBNull(3) ? null : reader.GetString(3));
+                order2.Add(id);
+            }
+            if (!reader.IsDBNull(4))
+                map[reader.GetString(4)] = reader.IsDBNull(5) ? "" : reader.GetString(5);
+        }
+        return order2
+            .Select(id => new ResponseAnalysis(values[id], analysis[id].Score, analysis[id].IsNegative, analysis[id].Topic))
+            .ToList();
     }
 
     // The individual responses on a given weekday within the window (the 曜日 view's terminal 個票一覧).

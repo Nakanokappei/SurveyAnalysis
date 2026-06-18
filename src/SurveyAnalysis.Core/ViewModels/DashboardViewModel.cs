@@ -54,8 +54,9 @@ public partial class DashboardViewModel : ViewModelBase
     [ObservableProperty]
     private bool _hasNoResponses;
 
-    // The "click a bar to drill down" hint only applies to the sample's clickable chart.
-    public bool ShowDrillHint => !CanDrillUp && !AnalysisPending;
+    // The "click a bar to drill down" hint only applies to the sample's clickable chart (real-project
+    // topic bars are not drillable).
+    public bool ShowDrillHint => _isSample && !CanDrillUp && !AnalysisPending;
 
     // KPI cards.
     [ObservableProperty]
@@ -116,40 +117,87 @@ public partial class DashboardViewModel : ViewModelBase
             ShowRealOverview();
     }
 
-    // Real overview: total responses and the answer list come from the analytics star, filtered to the
-    // selected 対象期間 (dated responses within the window, newest first). Topic/sentiment analytics are
-    // left empty and marked pending until LLM analysis exists.
+    // Real overview: pulls each response in the selected 対象期間 with its persisted analysis (sentiment +
+    // main topic) from the star — the same source the slices read. KPIs, the topic / sentiment charts and
+    // the per-response 感情 / トピック columns are all derived from it. When responses exist but none have
+    // been analysed yet (no API key / analysis not run), the charts stay empty and pending is shown.
     private void ShowRealOverview()
     {
-        AnalysisPending = true;
-        NegativeDisplay = "—";
-        AverageSentiment = "—";
-        TopicBars.Clear();
-        SentimentBars.Clear();
-
         var (fromKey, toKey) = _range.DateKeyWindow;
-        var inRange = _analytics.ResponsesForScope(_projectId, TimeScope.Root, fromKey, toKey, newestFirst: true);
+        var inRange = _analytics.ResponsesWithAnalysisForScope(_projectId, fromKey, toKey, newestFirst: true);
         TotalResponses = inRange.Count;
         HasNoResponses = inRange.Count == 0;
+
+        var analysed = inRange.Any(r => r.SentimentScore is not null || r.Topic is not null);
+        AnalysisPending = inRange.Count > 0 && !analysed;
+
+        if (analysed)
+        {
+            var scores = inRange.Where(r => r.SentimentScore is not null).Select(r => r.SentimentScore!.Value).ToList();
+            AverageSentiment = scores.Count == 0 ? "—" : scores.Average().ToString("+0.00;-0.00;0.00");
+            NegativeDisplay = inRange.Count(r => r.IsNegative).ToString();
+            ReplaceBars(TopicBars, TopicCounts(inRange));
+            ReplaceSentimentBars(SentimentDistribution(inRange));
+        }
+        else
+        {
+            AverageSentiment = "—";
+            NegativeDisplay = "—";
+            TopicBars.Clear();
+            SentimentBars.Clear();
+        }
 
         Rows.Clear();
         foreach (var response in inRange)
             Rows.Add(BuildRow(response));
     }
 
+    // Response counts per assigned (main 自由記述) topic, largest first; responses with no topic are left
+    // out. Same grouping the トピック別 slice uses (main_topic_key), so the two never disagree.
+    private static IReadOnlyList<(string Label, int Count)> TopicCounts(IReadOnlyList<ResponseAnalysis> responses)
+    {
+        var counts = new Dictionary<string, int>();
+        foreach (var response in responses)
+            if (!string.IsNullOrEmpty(response.Topic))
+                counts[response.Topic] = counts.GetValueOrDefault(response.Topic) + 1;
+        return counts.OrderByDescending(c => c.Value).Select(c => (c.Key, c.Value)).ToList();
+    }
+
+    // The three-way sentiment split (colours match the sample): ネガティブ is the LLM's negative flag, and
+    // the remaining responses divide into ポジティブ (a clearly positive score) and 中立. Unscored
+    // responses are excluded.
+    private static IReadOnlyList<(string Label, int Count, string Accent)> SentimentDistribution(IReadOnlyList<ResponseAnalysis> responses)
+    {
+        int positive = 0, neutral = 0, negative = 0;
+        foreach (var response in responses)
+            if (response.IsNegative)
+                negative++;
+            else if (response.SentimentScore is { } score && score >= 0.2)
+                positive++;
+            else if (response.SentimentScore is not null)
+                neutral++;
+        return new[]
+        {
+            ("ポジティブ", positive, "#16A34A"),
+            ("中立", neutral, "#CA8A04"),
+            ("ネガティブ", negative, "#DC2626"),
+        };
+    }
+
     // Builds one table row from a response: 記入日 from the aggregation date, the excerpt from the
-    // free-text field, and topic/sentiment pending LLM. Personal information is never shown.
-    private SurveyRow BuildRow(IReadOnlyDictionary<string, string> response)
+    // free-text field, the assigned topic and the row sentiment score. Personal information is never shown.
+    private SurveyRow BuildRow(ResponseAnalysis response)
     {
         var entryDate = "—";
-        if (_aggregationFieldName is not null && response.TryGetValue(_aggregationFieldName, out var date))
+        if (_aggregationFieldName is not null && response.Values.TryGetValue(_aggregationFieldName, out var date))
             entryDate = FormatDate(date);
 
         var excerpt = "";
-        if (_excerptFieldName is not null && response.TryGetValue(_excerptFieldName, out var text))
+        if (_excerptFieldName is not null && response.Values.TryGetValue(_excerptFieldName, out var text))
             excerpt = Truncate(text, 40);
 
-        return new SurveyRow { EntryDate = entryDate, Topic = "—", Sentiment = "—", Excerpt = excerpt };
+        var sentiment = response.SentimentScore is { } score ? score.ToString("+0.00;-0.00;0.00") : "—";
+        return new SurveyRow { EntryDate = entryDate, Topic = response.Topic ?? "—", Sentiment = sentiment, Excerpt = excerpt };
     }
 
     // ===== Sample (dummy) dashboard, preserved for layout review =====
@@ -160,7 +208,7 @@ public partial class DashboardViewModel : ViewModelBase
         HasNoResponses = false;
 
         ReplaceBars(TopicBars, SampleData.TopicCounts);
-        ReplaceSentimentBars();
+        ReplaceSentimentBars(SampleData.SentimentCounts);
 
         Rows.Clear();
         foreach (var row in SampleData.RecentRows)
@@ -187,7 +235,7 @@ public partial class DashboardViewModel : ViewModelBase
             ("第4週", 6),
         };
         ReplaceBars(TopicBars, weekly);
-        ReplaceSentimentBars();
+        ReplaceSentimentBars(SampleData.SentimentCounts);
 
         Rows.Clear();
         foreach (var row in SampleData.RecentRows)
@@ -227,14 +275,14 @@ public partial class DashboardViewModel : ViewModelBase
     }
 
     // Sentiment bars carry their own accent colors, so they get a dedicated builder.
-    private void ReplaceSentimentBars()
+    private void ReplaceSentimentBars(IReadOnlyList<(string Label, int Count, string Accent)> data)
     {
         var max = 1;
-        foreach (var d in SampleData.SentimentCounts)
+        foreach (var d in data)
             if (d.Count > max) max = d.Count;
 
         SentimentBars.Clear();
-        foreach (var d in SampleData.SentimentCounts)
+        foreach (var d in data)
             SentimentBars.Add(new BarItem { Label = d.Label, Count = d.Count, BarWidth = d.Count / (double)max * MaxBarWidth, Accent = d.Accent });
     }
 
