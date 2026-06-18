@@ -62,4 +62,43 @@ public class ImportViewModelTests
         Assert.Contains(byRegion, r => r.Label == "東京都" && r.Count == 1);
         Assert.Contains(byRegion, r => r.Label == "大阪府" && r.Count == 1);
     }
+
+    [Fact]
+    public void Merge_raises_Merged_with_the_project_so_the_host_can_analyse()
+    {
+        var (temp, project, responses, analytics) = Setup();
+        using var _ = temp;
+
+        var vm = new ImportViewModel(project, responses, analytics);
+        vm.LoadCsv(Encoding.UTF8.GetBytes("記入日,都道府県,ご意見\n2026/05/20,東京都,良かった\n"), "t.csv");
+        vm.Columns[0].SelectedMapping = "記入日";
+        vm.Columns[1].SelectedMapping = "都道府県";
+        vm.Columns[2].SelectedMapping = "ご意見";
+
+        Project? merged = null;
+        vm.Merged += p => merged = p;
+        vm.MergeCommand.Execute(null);
+
+        Assert.Same(project, merged);
+    }
+
+    [Fact]
+    public void Merge_does_not_raise_Merged_when_nothing_is_imported()
+    {
+        var (temp, project, responses, analytics) = Setup();
+        using var _ = temp;
+
+        var vm = new ImportViewModel(project, responses, analytics);
+        vm.LoadCsv(Encoding.UTF8.GetBytes("記入日,都道府県,ご意見\n2026/05/20,東京都,良かった\n"), "t.csv");
+        // Every column set to 取り込まない: merge is allowed (all mapped) but yields no responses.
+        foreach (var column in vm.Columns)
+            column.SelectedMapping = "（取り込まない）";
+
+        var raised = false;
+        vm.Merged += _ => raised = true;
+        vm.MergeCommand.Execute(null);
+
+        Assert.False(raised);
+        Assert.Equal(0, responses.CountForProject(project.Id));
+    }
 }

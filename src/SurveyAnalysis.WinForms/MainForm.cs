@@ -455,6 +455,8 @@ public sealed class MainForm : Form
 
     // A dim section heading ("切り口") above a group of nav buttons; its text lines up with the item text
     // below it via the shared nav indent. Instance method so it can convert that indent for the DPI.
+    // The top margin alone sets the gap above the heading (the item above has no bottom margin), so it is
+    // the full ダッシュボード → 切り口 spacing — doubled here at the user's request.
     private Label SectionLabel(string text) => new()
     {
         Text = text,
@@ -462,7 +464,7 @@ public sealed class MainForm : Form
         Font = Theme.Font(8.5f, FontStyle.Bold),
         AutoSize = true,
         Anchor = AnchorStyles.Left,
-        Margin = new Padding(LogicalToDeviceUnits(NavTextIndentDip), 12, 0, 4),
+        Margin = new Padding(LogicalToDeviceUnits(NavTextIndentDip), 24, 0, 4),
     };
 
     // A thin divider line between the project actions and 設定 (stretches to the column).

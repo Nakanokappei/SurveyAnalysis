@@ -4,6 +4,8 @@ using System.ComponentModel;
 using System.Drawing;
 using System.IO;
 using System.Windows.Forms;
+using SurveyAnalysis.Llm.Consumers;
+using SurveyAnalysis.Models;
 using SurveyAnalysis.ViewModels;
 
 namespace SurveyAnalysis.WinForms;
@@ -55,6 +57,7 @@ internal sealed class ImportForm : Form
         RefreshScalars();
 
         _vm.PropertyChanged += OnVmPropertyChanged;
+        _vm.Merged += OnMerged;
         WireCommand(_vm.FirstCommand, _first);
         WireCommand(_vm.PreviousCommand, _previous);
         WireCommand(_vm.NextCommand, _next);
@@ -66,8 +69,27 @@ internal sealed class ImportForm : Form
     protected override void Dispose(bool disposing)
     {
         if (disposing)
+        {
             _vm.PropertyChanged -= OnVmPropertyChanged;
+            _vm.Merged -= OnMerged;
+        }
         base.Dispose(disposing);
+    }
+
+    // After a successful merge, run the import-time sentiment/topic analysis with a progress dialog and
+    // re-project the star — the same step the CSV-create flow runs. Skipped silently when no API key is
+    // configured or the project has no 自由記述 columns (the merge already inserted the rows and rebuilt
+    // the star, so there is nothing more to do).
+    private void OnMerged(Project project)
+    {
+        var settings = new SettingsViewModel(AppServices.Settings);
+        if (string.IsNullOrWhiteSpace(settings.ApiKey) || !ImportAnalyzer.HasAnalyzableFields(project))
+            return;
+
+        var analyzer = new ImportAnalyzer(AppServices.Llm, AppServices.Responses, AppServices.Topics, AppServices.AnalysisResults, settings.SentimentModel);
+        using var dialog = new AnalyzeProgressForm((progress, ct) => analyzer.AnalyzeAsync(project, progress, ct));
+        if (dialog.ShowDialog(this) == DialogResult.OK)
+            AppServices.Analytics.Rebuild(project);
     }
 
     private void BuildLayout()

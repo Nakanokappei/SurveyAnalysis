@@ -1,3 +1,4 @@
+using System;
 using System.Collections.Generic;
 using System.Collections.ObjectModel;
 using System.ComponentModel;
@@ -20,6 +21,12 @@ public partial class ImportViewModel : ViewModelBase
     private readonly Project _project;
     private readonly ResponseRepository _responses;
     private readonly AnalyticsRepository _analytics;
+
+    // Raised after a successful merge (responses persisted + star rebuilt), carrying the project so the
+    // host can run the import-time sentiment/topic analysis and re-project. That step lives in the
+    // WinForms layer because it needs the LLM client and a progress dialog; headless callers / tests
+    // simply ignore the event (the merge itself is already complete).
+    public event Action<Project>? Merged;
 
     [ObservableProperty]
     private string _selectedFile = "（CSVファイル未選択）";
@@ -183,6 +190,10 @@ public partial class ImportViewModel : ViewModelBase
 
         var total = _responses.CountForProject(_project.Id);
         StatusMessage = $"{responses.Count} 件をマージしました（このプロジェクトの回答数：{total} 件）。";
+
+        // The raw rows + star are now in place; let the host analyse the new 自由記述 (sentiment/topic)
+        // and re-project, mirroring the CSV-create flow.
+        Merged?.Invoke(_project);
     }
 
     // CSVの1列：列名、プロジェクト項目への対応（ドロップダウン選択）、現在行の値。
