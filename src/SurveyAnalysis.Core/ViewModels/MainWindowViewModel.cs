@@ -109,18 +109,30 @@ public partial class MainWindowViewModel : ViewModelBase
         CurrentPage = new DashboardViewModel(project, _analytics);
     }
 
-    // Called by the host after the user reviews a CSV-seeded schema and confirms: persist the project,
-    // import the CSV's rows as responses (mapped to the fields by column name), refresh the analytics
-    // star so the slices reflect the new rows immediately, then open the new project's dashboard.
+    // Called by the host after the user reviews a CSV-seeded schema and confirms: persist the project and
+    // its rows, refresh the analytics star, then open its dashboard. The host that wants to run import
+    // analysis (sentiment / topics) between persisting and the dashboard calls the two granular methods
+    // below with the analysis step in between; this one-shot form keeps the no-analysis path simple.
     public void FinishProjectFromCsv(Project project, CsvFile csv, string source)
     {
-        _projects.Insert(project);
+        PersistImportedProject(project, csv, source);
+        ShowImportedDashboard(project);
+    }
 
+    // Persists a CSV-seeded project and its rows (no star rebuild, no navigation). The host runs the
+    // import analysis after this (it needs the saved responses) and then calls ShowImportedDashboard.
+    public void PersistImportedProject(Project project, CsvFile csv, string source)
+    {
+        _projects.Insert(project);
         var responses = CsvProjectImport.BuildResponses(project.Fields, csv);
         if (responses.Count > 0)
             _responses.InsertResponses(project.Id, source, responses);
-        _analytics.Rebuild(project);
+    }
 
+    // Rebuilds the analytics star (projecting any saved analysis) and opens the project's dashboard.
+    public void ShowImportedDashboard(Project project)
+    {
+        _analytics.Rebuild(project);
         CurrentProject = project;
         CurrentPage = new DashboardViewModel(project, _analytics);
     }

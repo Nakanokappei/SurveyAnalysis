@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Linq;
 using Microsoft.Data.Sqlite;
 using SurveyAnalysis.Models;
 
@@ -113,6 +114,41 @@ public sealed class ResponseRepository
         foreach (var responseId in order)
             result.Add(byResponse[responseId]);
         return result;
+    }
+
+    // Every response for a project as (id, field-name→value map), oldest first. The import analyzer needs
+    // the response id (to attach its sentiment / topic results) alongside the answer values.
+    public IReadOnlyList<(long Id, IReadOnlyDictionary<string, string> Values)> LoadForProjectWithIds(long projectId)
+    {
+        using var connection = _db.Open();
+        using var command = connection.CreateCommand();
+        command.CommandText = """
+            SELECT r.id, fl.name, a.value
+            FROM responses r
+            LEFT JOIN answers a ON a.response_id = r.id
+            LEFT JOIN fields fl ON fl.id = a.field_id
+            WHERE r.project_id = $pid
+            ORDER BY r.id ASC;
+            """;
+        command.Parameters.AddWithValue("$pid", projectId);
+
+        var byResponse = new Dictionary<long, Dictionary<string, string>>();
+        var order = new List<long>();
+        using var reader = command.ExecuteReader();
+        while (reader.Read())
+        {
+            var responseId = reader.GetInt64(0);
+            if (!byResponse.TryGetValue(responseId, out var values))
+            {
+                values = new Dictionary<string, string>();
+                byResponse[responseId] = values;
+                order.Add(responseId);
+            }
+            if (!reader.IsDBNull(1))
+                values[reader.GetString(1)] = reader.IsDBNull(2) ? "" : reader.GetString(2);
+        }
+
+        return order.Select(id => (id, (IReadOnlyDictionary<string, string>)byResponse[id])).ToList();
     }
 
     // Total responses stored for a project (shown as import feedback; the dashboard will use this).

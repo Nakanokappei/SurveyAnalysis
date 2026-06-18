@@ -526,7 +526,27 @@ public sealed class MainForm : Form
 
         using var form = new ProjectDesignForm(vm);
         if (form.ShowDialog(this) == DialogResult.OK && form.ResultProject is { } project && vm.SourceCsv is { } csv)
-            _shell.FinishProjectFromCsv(project, csv, Path.GetFileName(picker.FileName));
+        {
+            // Persist first (the analyzer reads the saved responses), run the import analysis with a
+            // progress dialog, then rebuild the star and open the dashboard.
+            _shell.PersistImportedProject(project, csv, Path.GetFileName(picker.FileName));
+            RunImportAnalysis(project);
+            _shell.ShowImportedDashboard(project);
+        }
+    }
+
+    // Runs the import-time sentiment / topic analysis with a modal progress dialog. Skipped (sentiment /
+    // topics stay unanalysed) when no API key is configured or the project has no 自由記述 columns. The
+    // results are persisted; ShowImportedDashboard's Rebuild then projects them into the star.
+    private void RunImportAnalysis(Project project)
+    {
+        var settings = _shell.CreateSettingsViewModel();
+        if (string.IsNullOrWhiteSpace(settings.ApiKey) || !ImportAnalyzer.HasAnalyzableFields(project))
+            return;
+
+        var analyzer = new ImportAnalyzer(AppServices.Llm, AppServices.Responses, AppServices.Topics, AppServices.AnalysisResults, settings.SentimentModel);
+        using var dialog = new AnalyzeProgressForm((progress, ct) => analyzer.AnalyzeAsync(project, progress, ct));
+        dialog.ShowDialog(this);
     }
 
     // Refines the heuristic CSV column types AND suggests a project description with the LLM before the
