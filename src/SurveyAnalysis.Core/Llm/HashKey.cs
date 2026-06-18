@@ -43,6 +43,13 @@ public static class HashKey
         {
             Append(sb, message.Role);
             Append(sb, message.Content);
+            // Attached images change the response, so they are part of the key — otherwise two OCR
+            // requests with the same prompt but different images would collide on one cached result.
+            var images = message.ImageDataUrls;
+            Append(sb, (images?.Count ?? 0).ToString(CultureInfo.InvariantCulture));
+            if (images is not null)
+                foreach (var url in images)
+                    Append(sb, url);
         }
         Append(sb, Num(temperature));
         Append(sb, Num(maxTokens));

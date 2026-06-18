@@ -5,6 +5,7 @@ using System.Diagnostics;
 using System.Drawing;
 using System.IO;
 using System.Linq;
+using System.Threading;
 using System.Threading.Tasks;
 using System.Windows.Forms;
 using SurveyAnalysis.Data;
@@ -62,6 +63,7 @@ public sealed class MainForm : Form
         _shell.CreateProjectRequested += OnCreateProject;
         _shell.CreateProjectFromCsvRequested += OnCreateProjectFromCsv;
         _shell.ImportRequested += OnImport;
+        _shell.ImportImagesRequested += OnImportImages;
         _shell.EditSchemaRequested += OnEditSchema;
 
         RebuildSidebar();
@@ -278,6 +280,7 @@ public sealed class MainForm : Form
         if (_shell.IsProjectOpen)
         {
             AddRow(bottom, NavButton(Icons.Add, "インポート (CSV)", () => _shell.ImportCommand.Execute(null)));
+            AddRow(bottom, NavButton(Icons.Image, "画像から取り込む", () => _shell.ImportImagesCommand.Execute(null)));
             AddRow(bottom, NavButton(Icons.Export, "エクスポート", OnExportNotImplemented));
             // 閉じる is a project action too, so no divider line above it — but it is set apart from the
             // import/export pair by extra spacing (a wider top margin) so it still reads as distinct.
@@ -596,6 +599,153 @@ public sealed class MainForm : Form
     {
         using var form = new ImportForm(new ImportViewModel(project, AppServices.Responses, AppServices.Analytics));
         form.ShowDialog(this);
+    }
+
+    // ===== 画像から取り込む（スキャン画像 → OCR → 回答） =====
+
+    private static readonly string[] ScanImageExtensions = { ".jpg", ".jpeg", ".png", ".webp" };
+
+    // 画像から取り込む。設定の読み取りフォルダ直下のスキャン画像を vision OCR で読み、1 枚 = 1 回答として
+    // 取り込み、CSV と同じ感情/トピック解析 → スター再投影 → ダッシュボード表示を行う。読み取り後は設定
+    // (ArchiveAfterScan) に従い「アーカイブ」サブフォルダへ移動して二重読み取りを防ぐ。
+    private void OnImportImages(Project project)
+    {
+        var settings = _shell.CreateSettingsViewModel();
+
+        // OCR は vision モデル必須。API キーが無ければ何もできないので案内して戻る。
+        if (string.IsNullOrWhiteSpace(settings.ApiKey))
+        {
+            MessageBox.Show(this, "画像の読み取りには OpenAI の API キーが必要です。設定の「LLM」で設定してください。",
+                "画像から取り込む", MessageBoxButtons.OK, MessageBoxIcon.Information);
+            return;
+        }
+
+        var scanFolder = settings.ScanFolderPath;
+        if (string.IsNullOrWhiteSpace(scanFolder) || !Directory.Exists(scanFolder))
+        {
+            MessageBox.Show(this, $"読み取りフォルダが見つかりません。\n{scanFolder}\n設定の「全般」で読み取りフォルダを指定してください。",
+                "画像から取り込む", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+            return;
+        }
+
+        // Top-level image files only — the アーカイブ subfolder (where read images move to) is a subdir, so
+        // EnumerateFiles (non-recursive) excludes it naturally.
+        var images = EnumerateScanImages(scanFolder);
+        if (images.Count == 0)
+        {
+            MessageBox.Show(this, $"読み取りフォルダに画像が見つかりませんでした。\n{scanFolder}",
+                "画像から取り込む", MessageBoxButtons.OK, MessageBoxIcon.Information);
+            return;
+        }
+
+        // Each image is a paid vision request — confirm before sending the batch.
+        var confirm = MessageBox.Show(this,
+            $"{images.Count} 件の画像を読み取って「{project.Name}」に取り込みます。よろしいですか？",
+            "画像から取り込む", MessageBoxButtons.OKCancel, MessageBoxIcon.Question);
+        if (confirm != DialogResult.OK)
+            return;
+
+        // OCR each image with a progress dialog, collecting one response per image that yielded any answer
+        // and the source paths that were read (for archiving). The lists are populated on the dialog's
+        // async work and read here after it closes OK.
+        var fields = project.Fields.ToList();
+        var extractor = new OcrExtractor(AppServices.Llm, settings.OcrModel);
+        var responses = new List<SurveyResponse>();
+        var processedPaths = new List<string>();
+
+        using (var dialog = new AnalyzeProgressForm((progress, ct) =>
+            OcrImagesAsync(extractor, fields, project.Description, images, responses, processedPaths, progress, ct), "読み取り"))
+        {
+            if (dialog.ShowDialog(this) != DialogResult.OK)
+                return;   // cancelled or errored — nothing persisted, nothing archived
+        }
+
+        if (responses.Count == 0)
+        {
+            MessageBox.Show(this, "画像から取り込める回答が読み取れませんでした。", "画像から取り込む",
+                MessageBoxButtons.OK, MessageBoxIcon.Information);
+            return;
+        }
+
+        // Persist the OCR'd rows, run the same sentiment/topic analysis the CSV paths run, archive the read
+        // images, then re-project the star and open the dashboard.
+        AppServices.Responses.InsertResponses(project.Id, "画像OCR", responses);
+        RunImportAnalysis(project);
+        ArchiveScannedImages(settings, processedPaths);
+        _shell.ShowImportedDashboard(project);
+    }
+
+    // Reads and OCR-extracts each image in turn, reporting n/total. Each image's bytes are read off the UI
+    // thread; ExtractAsync awaits the vision call off-thread. A response is collected only when the image
+    // produced at least one answer, but every successfully-read image is recorded for archiving so the
+    // folder drains. A read/OCR error propagates so the whole batch aborts (nothing is persisted) and the
+    // user can retry — the LLM cache makes the re-run of already-read images free.
+    private static async Task OcrImagesAsync(
+        OcrExtractor extractor, IReadOnlyList<DataField> fields, string description,
+        IReadOnlyList<string> imagePaths, List<SurveyResponse> responses, List<string> processedPaths,
+        IProgress<(int Done, int Total)> progress, CancellationToken ct)
+    {
+        var total = imagePaths.Count;
+        var done = 0;
+        foreach (var path in imagePaths)
+        {
+            ct.ThrowIfCancellationRequested();
+            var bytes = await Task.Run(() => File.ReadAllBytes(path), ct).ConfigureAwait(false);
+            var values = await extractor.ExtractAsync(bytes, MediaTypeFor(path), fields, description, ct).ConfigureAwait(false);
+            var response = OcrExtractor.BuildResponse(values, fields);
+            if (response.Answers.Count > 0)
+                responses.Add(response);
+            processedPaths.Add(path);
+            done++;
+            progress.Report((done, total));
+        }
+    }
+
+    // Image files directly under the scan folder, sorted by name for a stable processing order.
+    private static List<string> EnumerateScanImages(string folder) =>
+        Directory.EnumerateFiles(folder)
+            .Where(f => ScanImageExtensions.Contains(Path.GetExtension(f).ToLowerInvariant()))
+            .OrderBy(f => f, StringComparer.OrdinalIgnoreCase)
+            .ToList();
+
+    // The data-URL media type for an image path (defaults to JPEG for .jpg/.jpeg and anything unexpected).
+    private static string MediaTypeFor(string path) => Path.GetExtension(path).ToLowerInvariant() switch
+    {
+        ".png" => "image/png",
+        ".webp" => "image/webp",
+        _ => "image/jpeg",
+    };
+
+    // Moves every read image into the scan folder's アーカイブ subfolder (per ArchiveAfterScan), creating it
+    // if needed. Best-effort: the rows are already imported, so a move failure is reported but not fatal.
+    private void ArchiveScannedImages(SettingsViewModel settings, IReadOnlyList<string> paths)
+    {
+        if (!settings.ArchiveAfterScan || paths.Count == 0)
+            return;
+        var archiveDir = Path.Combine(settings.ScanFolderPath, settings.ArchiveSubfolderName);
+        try
+        {
+            Directory.CreateDirectory(archiveDir);
+            foreach (var path in paths)
+                MoveToArchive(path, archiveDir);
+        }
+        catch (Exception ex)
+        {
+            MessageBox.Show(this, "読み取り済み画像のアーカイブ移動に失敗しました。\n" + ex.Message,
+                "画像から取り込む", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+        }
+    }
+
+    // Moves one file into the archive folder, disambiguating the name on collision (name, name (2), …).
+    private static void MoveToArchive(string sourcePath, string archiveDir)
+    {
+        var name = Path.GetFileNameWithoutExtension(sourcePath);
+        var ext = Path.GetExtension(sourcePath);
+        var target = Path.Combine(archiveDir, name + ext);
+        var counter = 2;
+        while (File.Exists(target))
+            target = Path.Combine(archiveDir, $"{name} ({counter++}){ext}");
+        File.Move(sourcePath, target);
     }
 
     // 設定（モーダル）。開くときに保存値を読み込み、閉じたら書き戻す。

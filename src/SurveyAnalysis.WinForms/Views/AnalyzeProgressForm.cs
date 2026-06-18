@@ -13,17 +13,21 @@ namespace SurveyAnalysis.WinForms;
 internal sealed class AnalyzeProgressForm : Form
 {
     private readonly Func<IProgress<(int Done, int Total)>, CancellationToken, Task> _work;
+    private readonly string _caption;   // the verb shown in the title/status (e.g. 解析 / 読み取り)
     private readonly CancellationTokenSource _cts = new();
     private readonly Label _status = new() { AutoSize = false, Dock = DockStyle.Top, Height = 28, TextAlign = ContentAlignment.MiddleLeft, Font = Theme.Font(10f), ForeColor = Theme.TitleText };
     private readonly ProgressBar _bar = new() { Dock = DockStyle.Top, Height = 18, Style = ProgressBarStyle.Continuous, Minimum = 0, Maximum = 1 };
 
-    public AnalyzeProgressForm(Func<IProgress<(int Done, int Total)>, CancellationToken, Task> work)
+    // caption names the running step ("解析" for sentiment/topics, "読み取り" for OCR) so the window
+    // title and the n/total status read for that step; defaults to 解析 (the import-analysis use).
+    public AnalyzeProgressForm(Func<IProgress<(int Done, int Total)>, CancellationToken, Task> work, string caption = "解析")
     {
         _work = work;
+        _caption = caption;
 
         AutoScaleDimensions = new SizeF(96F, 96F);
         AutoScaleMode = AutoScaleMode.Dpi;
-        Text = "解析中";
+        Text = _caption + "中";
         FormBorderStyle = FormBorderStyle.FixedDialog;
         MaximizeBox = false;
         MinimizeBox = false;
@@ -34,7 +38,7 @@ internal sealed class AnalyzeProgressForm : Form
         BackColor = Theme.ContentBack;
         Padding = new Padding(LogicalToDeviceUnits(16));
 
-        _status.Text = "解析の準備をしています…";
+        _status.Text = _caption + "の準備をしています…";
 
         var cancel = new Button
         {
@@ -60,7 +64,7 @@ internal sealed class AnalyzeProgressForm : Form
         {
             _bar.Maximum = Math.Max(1, p.Total);
             _bar.Value = Math.Min(p.Done, _bar.Maximum);
-            _status.Text = $"解析中… {p.Done} / {p.Total}";
+            _status.Text = $"{_caption}中… {p.Done} / {p.Total}";
         });
 
         try
@@ -74,7 +78,7 @@ internal sealed class AnalyzeProgressForm : Form
         }
         catch (Exception ex)
         {
-            MessageBox.Show(this, "解析中にエラーが発生しました。\n" + ex.Message, "解析", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+            MessageBox.Show(this, $"{_caption}中にエラーが発生しました。\n" + ex.Message, _caption, MessageBoxButtons.OK, MessageBoxIcon.Warning);
             DialogResult = DialogResult.Abort;
         }
         Close();

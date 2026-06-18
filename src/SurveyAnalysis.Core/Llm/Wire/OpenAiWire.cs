@@ -10,7 +10,25 @@ namespace SurveyAnalysis.Llm.Wire;
 internal sealed class ChatMessageWire
 {
     [JsonPropertyName("role")] public string Role { get; set; } = "";
-    [JsonPropertyName("content")] public string? Content { get; set; }
+    // Either a plain string (text-only message) or a List<ChatContentPartWire> (multimodal: text +
+    // images). Typed as object so the same message shape carries both; the runtime type is resolved
+    // against this context, which registers string and the parts list below.
+    [JsonPropertyName("content")] public object? Content { get; set; }
+}
+
+// One part of a multimodal message: a text part ({"type":"text","text":...}) or an image part
+// ({"type":"image_url","image_url":{"url":"data:..."}}). The unused sibling is null and dropped on
+// write (WhenWritingNull), so each part serializes to exactly the OpenAI vision shape.
+internal sealed class ChatContentPartWire
+{
+    [JsonPropertyName("type")] public string Type { get; set; } = "";
+    [JsonPropertyName("text")] public string? Text { get; set; }
+    [JsonPropertyName("image_url")] public ChatImageUrlWire? ImageUrl { get; set; }
+}
+
+internal sealed class ChatImageUrlWire
+{
+    [JsonPropertyName("url")] public string Url { get; set; } = "";
 }
 
 internal sealed class ResponseFormatWire
@@ -29,9 +47,17 @@ internal sealed class ChatRequestWire
     [JsonPropertyName("stream")] public bool Stream { get; set; }
 }
 
+// The assistant's reply message: content is always a plain string (text), so it stays typed as string
+// rather than the request side's polymorphic object.
+internal sealed class ChatResponseMessageWire
+{
+    [JsonPropertyName("role")] public string Role { get; set; } = "";
+    [JsonPropertyName("content")] public string? Content { get; set; }
+}
+
 internal sealed class ChatChoiceWire
 {
-    [JsonPropertyName("message")] public ChatMessageWire? Message { get; set; }
+    [JsonPropertyName("message")] public ChatResponseMessageWire? Message { get; set; }
 }
 
 internal sealed class ChatUsageWire
@@ -72,6 +98,10 @@ internal sealed class EmbeddingResponseWire
 [JsonSerializable(typeof(ChatResponseWire))]
 [JsonSerializable(typeof(EmbeddingRequestWire))]
 [JsonSerializable(typeof(EmbeddingResponseWire))]
+// Registered so the object-typed message content resolves to these runtime types (a plain string is
+// a built-in converter; a multimodal message serializes through the parts list).
+[JsonSerializable(typeof(string))]
+[JsonSerializable(typeof(List<ChatContentPartWire>))]
 internal sealed partial class OpenAiJsonContext : JsonSerializerContext
 {
 }

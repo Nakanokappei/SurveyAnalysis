@@ -108,4 +108,40 @@ public class LlmClientTests
         var handler = FakeHttpMessageHandler.Always("not json");
         await Assert.ThrowsAsync<LlmException>(() => Client(handler).CompleteAsync(Chat()));
     }
+
+    [Fact]
+    public async Task Text_only_message_sends_content_as_a_string()
+    {
+        var handler = FakeHttpMessageHandler.Always(ChatOk);
+        await Client(handler).CompleteAsync(Chat());
+
+        using var doc = JsonDocument.Parse(handler.Requests.Single().Body);
+        var content = doc.RootElement.GetProperty("messages")[0].GetProperty("content");
+        Assert.Equal(JsonValueKind.String, content.ValueKind);   // backward-compatible string form
+    }
+
+    [Fact]
+    public async Task Message_with_images_sends_a_multimodal_content_array()
+    {
+        var handler = FakeHttpMessageHandler.Always(ChatOk);
+        var request = new ChatRequest("gpt-4o", new[]
+        {
+            new ChatMessage("system", "S"),
+            new ChatMessage("user", "読み取って", new[] { "data:image/png;base64,AAAA" }),
+        }, Temperature: 0, ResponseFormat: "json_object");
+
+        await Client(handler).CompleteAsync(request);
+
+        using var doc = JsonDocument.Parse(handler.Requests.Single().Body);
+        var messages = doc.RootElement.GetProperty("messages");
+        // System stays a plain string; the user message becomes a [text, image_url] array.
+        Assert.Equal(JsonValueKind.String, messages[0].GetProperty("content").ValueKind);
+        var parts = messages[1].GetProperty("content");
+        Assert.Equal(JsonValueKind.Array, parts.ValueKind);
+        Assert.Equal(2, parts.GetArrayLength());
+        Assert.Equal("text", parts[0].GetProperty("type").GetString());
+        Assert.Equal("読み取って", parts[0].GetProperty("text").GetString());
+        Assert.Equal("image_url", parts[1].GetProperty("type").GetString());
+        Assert.Equal("data:image/png;base64,AAAA", parts[1].GetProperty("image_url").GetProperty("url").GetString());
+    }
 }

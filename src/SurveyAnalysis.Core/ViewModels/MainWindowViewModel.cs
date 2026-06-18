@@ -32,6 +32,10 @@ public partial class MainWindowViewModel : ViewModelBase
     // Raised when the user asks to import CSV; the view opens the modal import dialog.
     public event Action<Project>? ImportRequested;
 
+    // Raised when the user asks to import from scanned images; the view scans the configured folder,
+    // OCRs each image into a response, then runs the same import analysis the CSV paths do.
+    public event Action<Project>? ImportImagesRequested;
+
     // Raised when the user asks to edit the open project's schema (データ項目); the view opens the
     // design dialog in edit mode with the current project.
     public event Action<Project>? EditSchemaRequested;
@@ -202,6 +206,14 @@ public partial class MainWindowViewModel : ViewModelBase
     {
         if (CurrentProject is { } project)
             ImportRequested?.Invoke(project);
+    }
+
+    // 画像から取り込む（スキャン画像をOCRして回答化）
+    [RelayCommand]
+    private void ImportImages()
+    {
+        if (CurrentProject is { } project)
+            ImportImagesRequested?.Invoke(project);
     }
 
     // プロジェクトを閉じる → back to the welcome page.

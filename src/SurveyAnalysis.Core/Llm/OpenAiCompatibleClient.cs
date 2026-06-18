@@ -63,7 +63,7 @@ public sealed class OpenAiCompatibleClient : ILlmClient
         var wire = new ChatRequestWire
         {
             Model = request.Model,
-            Messages = request.Messages.Select(m => new ChatMessageWire { Role = m.Role, Content = m.Content }).ToList(),
+            Messages = request.Messages.Select(m => new ChatMessageWire { Role = m.Role, Content = BuildContent(m) }).ToList(),
             Temperature = request.Temperature,
             MaxTokens = request.MaxTokens,
             ResponseFormat = request.ResponseFormat is null ? null : new ResponseFormatWire { Type = request.ResponseFormat },
@@ -85,6 +85,23 @@ public sealed class OpenAiCompatibleClient : ILlmClient
         if (_options.CacheEnabled)
             _cache.PutChat(key, _chat.Label, request.Model, result);
         return result;
+    }
+
+    // Shapes one message's wire content: a plain string for a text-only message (backward-compatible),
+    // or a multimodal parts array (the text first, then one image_url part per data URL) when the
+    // message carries images for a vision request.
+    private static object BuildContent(ChatMessage message)
+    {
+        if (message.ImageDataUrls is not { Count: > 0 } images)
+            return message.Content;
+
+        var parts = new List<ChatContentPartWire>(images.Count + 1)
+        {
+            new() { Type = "text", Text = message.Content },
+        };
+        foreach (var url in images)
+            parts.Add(new ChatContentPartWire { Type = "image_url", ImageUrl = new ChatImageUrlWire { Url = url } });
+        return parts;
     }
 
     // ===== Embeddings =====

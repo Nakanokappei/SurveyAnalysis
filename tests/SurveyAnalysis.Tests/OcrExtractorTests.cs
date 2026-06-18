@@ -1,0 +1,86 @@
+using System.Collections.Generic;
+using System.Linq;
+using System.Text;
+using System.Threading;
+using System.Threading.Tasks;
+using SurveyAnalysis.Llm;
+using SurveyAnalysis.Llm.Consumers;
+using SurveyAnalysis.Models;
+using Xunit;
+
+namespace SurveyAnalysis.Tests;
+
+// The OCR extractor turns a (fake) vision reply into a 項目名→値 map and then into a response, attaching
+// the image to the chat request so the client sends a multimodal call.
+public class OcrExtractorTests
+{
+    private static IReadOnlyList<DataField> Fields() => new[]
+    {
+        new DataField { Name = "記入日", FieldType = FieldType.Date },
+        new DataField { Name = "氏名", FieldType = FieldType.Name },
+        new DataField { Name = "満足度", FieldType = FieldType.Number },
+        new DataField { Name = "ご意見", FieldType = FieldType.FreeText },
+    };
+
+    [Fact]
+    public async Task Extracts_known_fields_and_attaches_the_image()
+    {
+        var llm = new CaptureChat("""
+            {"記入日":"2026/05/20","氏名":"山田太郎","満足度":4,"ご意見":"対応が丁寧でした","不明な列":"x"}
+            """);
+
+        var values = await new OcrExtractor(llm, "gpt-4o").ExtractAsync(
+            new byte[] { 1, 2, 3 }, "image/png", Fields(), "工事アンケート");
+
+        // String, numeric (kept as text) and free-text fields are read; an unknown key is ignored.
+        Assert.Equal("2026/05/20", values["記入日"]);
+        Assert.Equal("山田太郎", values["氏名"]);
+        Assert.Equal("4", values["満足度"]);
+        Assert.Equal("対応が丁寧でした", values["ご意見"]);
+        Assert.False(values.ContainsKey("不明な列"));
+
+        // The user message carried exactly one base64 data URL for the image bytes.
+        var userMessage = llm.LastRequest!.Messages.Single(m => m.Role == "user");
+        Assert.NotNull(userMessage.ImageDataUrls);
+        var dataUrl = Assert.Single(userMessage.ImageDataUrls!);
+        Assert.Equal("data:image/png;base64," + System.Convert.ToBase64String(new byte[] { 1, 2, 3 }), dataUrl);
+    }
+
+    [Fact]
+    public async Task Blank_values_are_omitted_and_build_response_maps_by_name()
+    {
+        var llm = new CaptureChat("""{"記入日":"2026/05/20","氏名":"","満足度":"","ご意見":"良い"}""");
+
+        var values = await new OcrExtractor(llm, "gpt-4o").ExtractAsync(
+            new byte[] { 9 }, "image/jpeg", Fields(), "");
+
+        Assert.False(values.ContainsKey("氏名"));   // blank → omitted
+        Assert.False(values.ContainsKey("満足度"));
+
+        var response = OcrExtractor.BuildResponse(values, Fields());
+        Assert.Equal(new[] { "記入日", "ご意見" }, response.Answers.Select(a => a.FieldName).ToArray());
+        Assert.Equal("良い", response.Answers.Single(a => a.FieldName == "ご意見").Value);
+    }
+
+    [Fact]
+    public async Task Unparseable_reply_yields_no_values()
+    {
+        var values = await new OcrExtractor(new CaptureChat("not json"), "gpt-4o").ExtractAsync(
+            new byte[] { 1 }, "image/png", Fields(), "");
+        Assert.Empty(values);
+    }
+
+    // A chat client that records the last request and replies with a fixed body.
+    private sealed class CaptureChat : IChatClient
+    {
+        private readonly string _reply;
+        public ChatRequest? LastRequest { get; private set; }
+        public CaptureChat(string reply) => _reply = reply;
+
+        public Task<ChatResult> CompleteAsync(ChatRequest request, CancellationToken ct = default)
+        {
+            LastRequest = request;
+            return Task.FromResult(new ChatResult(_reply, request.Model, null, null, false));
+        }
+    }
+}

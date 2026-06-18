@@ -50,6 +50,20 @@ public class HashKeyTests
     }
 
     [Fact]
+    public void Attached_images_are_part_of_the_chat_key()
+    {
+        // Same prompt text, different images → different keys (otherwise OCR results would collide).
+        var withA = new[] { new ChatMessage("user", "read", new[] { "data:image/png;base64,AAAA" }) };
+        var withB = new[] { new ChatMessage("user", "read", new[] { "data:image/png;base64,BBBB" }) };
+        var withoutImage = new[] { new ChatMessage("user", "read") };
+
+        var keyA = HashKey.ForChat(Ep, "gpt-4o", withA, 0, null, "json_object", null);
+        Assert.Equal(keyA, HashKey.ForChat(Ep, "gpt-4o", new[] { new ChatMessage("user", "read", new[] { "data:image/png;base64,AAAA" }) }, 0, null, "json_object", null)); // stable
+        Assert.NotEqual(keyA, HashKey.ForChat(Ep, "gpt-4o", withB, 0, null, "json_object", null));          // different image
+        Assert.NotEqual(keyA, HashKey.ForChat(Ep, "gpt-4o", withoutImage, 0, null, "json_object", null));   // image vs none
+    }
+
+    [Fact]
     public void Length_prefix_prevents_message_boundary_collisions()
     {
         // Without length-prefixing, ["a","bc"] and ["ab","c"] could concatenate identically.
