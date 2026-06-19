@@ -29,6 +29,24 @@ internal static class SliceTableView
         return panel;
     }
 
+    // The 感情極性の推移 card shown at the top of each 切り口: a title over a line chart of the selected
+    // period's monthly average sentiment. The chart is returned so the host can feed it data (SetData)
+    // and toggle the card's visibility from the view model on each refresh.
+    public static Panel BuildTrendCard(out SentimentTrendChart chart)
+    {
+        var card = Card();
+        var view = new SentimentTrendChart { Dock = DockStyle.Fill };
+        chart = view;
+        var title = new Label
+        {
+            Text = "感情極性の推移（月別平均）", Dock = DockStyle.Top, AutoSize = true,
+            ForeColor = Theme.TitleText, Font = Theme.Font(11f, FontStyle.Bold), Padding = new Padding(0, 0, 0, 6),
+        };
+        card.Controls.Add(view);    // Fill (added first, behind)
+        card.Controls.Add(title);   // Top
+        return card;
+    }
+
     // The 対象期間 picker (label + the shared DateRangePicker trigger) shown top-right — the same picker the
     // dashboard uses. Seeds the trigger from the view model and, when the user applies a range, pushes it
     // into the VM (which re-runs the aggregation) and refreshes the screen via onChanged.

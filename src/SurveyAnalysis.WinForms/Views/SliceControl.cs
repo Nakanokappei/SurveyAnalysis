@@ -17,6 +17,8 @@ internal sealed class SliceControl : UserControl
     private readonly Label _empty = new() { AutoSize = true, ForeColor = Theme.Faint, Font = Theme.Font(9.5f), Margin = new Padding(0, 0, 0, 6) };
     private readonly DataGridView _analysisGrid;
     private readonly DateRangePicker _rangePicker = new();
+    private readonly SentimentTrendChart _trendChart;
+    private readonly Panel _trendCard;
 
     public SliceControl(SliceViewModel vm)
     {
@@ -27,6 +29,8 @@ internal sealed class SliceControl : UserControl
         Dock = DockStyle.Fill;
         BackColor = Theme.ContentBack;
         _analysisGrid = SliceTableView.BuildAnalysisGrid(vm.DimensionTitle, vm.Columns);
+        _trendCard = SliceTableView.BuildTrendCard(out _trendChart);
+        _trendCard.MinimumSize = new Size(0, LogicalToDeviceUnits(176));
 
         BuildLayout();
         RefreshAll();
@@ -39,6 +43,7 @@ internal sealed class SliceControl : UserControl
         var root = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 1, BackColor = Theme.ContentBack, Padding = new Padding(24) };
         root.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
         AddRow(root, BuildHeader(), SizeType.AutoSize);
+        AddRow(root, _trendCard, SizeType.AutoSize);
         AddRow(root, _empty, SizeType.AutoSize);
         AddRow(root, BuildTableCard(), SizeType.Percent);
         Controls.Add(root);
@@ -92,6 +97,8 @@ internal sealed class SliceControl : UserControl
         _countSummary.Text = _vm.CountSummary;
         _empty.Text = _vm.EmptyMessage;
         _empty.Visible = !_vm.HasData;
+        _trendChart.SetData(_vm.SentimentTrend);
+        _trendCard.Visible = _vm.SentimentTrend.Count > 0;
         _analysisGrid.Visible = _vm.HasData;
         if (_vm.HasData)
             SliceTableView.FillAnalysisGrid(_analysisGrid, _vm.Rows, _vm.HasTotal ? _vm.TotalRow : null);

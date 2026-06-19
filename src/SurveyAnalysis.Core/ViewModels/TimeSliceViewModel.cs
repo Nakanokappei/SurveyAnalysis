@@ -145,6 +145,8 @@ public partial class TimeSliceViewModel : PeriodScopedViewModel
     {
         var scope = _path[^1];
         var (from, to) = Window;
+        // The trend is the 集計期間 overview (stable across drills, which keep the same window).
+        SentimentTrend = _analytics.SentimentTrend(_projectId, from, to);
         CanDrillUp = _path.Count > 1;
         IsTerminal = scope.IsTerminal;
 

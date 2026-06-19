@@ -106,6 +106,7 @@ public partial class WeekdaySliceViewModel : PeriodScopedViewModel
 
         IsResponseView = false;
         var (from, to) = Window;
+        SentimentTrend = _analytics.SentimentTrend(_projectId, from, to);
         var table = _analytics.AggregateRows(_projectId, AnalysisGrouping.Weekday, TimeScope.Root, from, to, Columns);
 
         Rows.Clear();

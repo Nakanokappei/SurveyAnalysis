@@ -24,6 +24,8 @@ internal sealed class TimeSliceControl : UserControl
     private readonly DataGridView _analysisGrid;
     private readonly DataGridView _responsesGrid = SliceTableView.BuildResponsesGrid();
     private readonly DateRangePicker _rangePicker = new();
+    private readonly SentimentTrendChart _trendChart;
+    private readonly Panel _trendCard;
 
     public TimeSliceControl(TimeSliceViewModel vm)
     {
@@ -35,6 +37,8 @@ internal sealed class TimeSliceControl : UserControl
         BackColor = Theme.ContentBack;
         _analysisGrid = SliceTableView.BuildAnalysisGrid("区分", vm.Columns);
         _analysisGrid.Cursor = Cursors.Hand; // rows drill down; the 全体 row (no Tag) is ignored on click
+        _trendCard = SliceTableView.BuildTrendCard(out _trendChart);
+        _trendCard.MinimumSize = new Size(0, LogicalToDeviceUnits(176));
 
         BuildLayout();
         WireInteractions();
@@ -48,6 +52,7 @@ internal sealed class TimeSliceControl : UserControl
         var root = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 1, BackColor = Theme.ContentBack, Padding = new Padding(24) };
         root.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
         AddRow(root, BuildHeader(), SizeType.AutoSize);
+        AddRow(root, _trendCard, SizeType.AutoSize);
         AddRow(root, _navBar, SizeType.AutoSize);
         AddRow(root, _levelTitle, SizeType.AutoSize);
         AddRow(root, _empty, SizeType.AutoSize);
@@ -134,6 +139,8 @@ internal sealed class TimeSliceControl : UserControl
         _levelTitle.Text = _vm.ChildLevelTitle;
         _empty.Text = _vm.EmptyMessage;
         _empty.Visible = !_vm.HasData;
+        _trendChart.SetData(_vm.SentimentTrend);
+        _trendCard.Visible = _vm.SentimentTrend.Count > 0;
         RebuildNavBar();
 
         _analysisGrid.Visible = _vm.ShowChildren;

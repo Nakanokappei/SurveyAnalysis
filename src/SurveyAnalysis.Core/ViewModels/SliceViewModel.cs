@@ -72,6 +72,7 @@ public partial class SliceViewModel : PeriodScopedViewModel
     protected override void Reload()
     {
         var (from, to) = Window;
+        SentimentTrend = _analytics.SentimentTrend(_projectId, from, to);
         var table = _analytics.AggregateRows(_projectId, _grouping, TimeScope.Root, from, to, Columns);
 
         Rows.Clear();

@@ -16,6 +16,10 @@ public sealed record ResponseAnalysis(
     bool IsNegative,
     string? Topic);
 
+// One point of the 感情極性の推移 line: a month (year+month for ordering/labels), the average row
+// sentiment over that month's analysed responses within the scope, and how many fed the average.
+public sealed record SentimentTrendPoint(int Year, int Month, string Label, double Average, int Count);
+
 // Builds and queries the analytics star schema. Rebuild performs the ETL: it reads a project's raw
 // responses/answers, resolves each response's date / region / topic dimension members, and writes
 // one fact_response row per response. AggregateBy answers a slice query (group the facts by one
@@ -198,6 +202,34 @@ public sealed class AnalyticsRepository
         return order2
             .Select(id => new ResponseAnalysis(values[id], analysis[id].Score, analysis[id].IsNegative, analysis[id].Topic))
             .ToList();
+    }
+
+    // The average row sentiment per month within the 集計期間 window (chronological), over responses that
+    // carry a sentiment score. Drives the 感情極性の推移 line at the top of every 切り口. Months with no
+    // analysed response are omitted, so the line connects only the months that have data. Dateless facts
+    // (no date_key) are excluded by the dim_date join, as they cannot sit on a time axis.
+    public IReadOnlyList<SentimentTrendPoint> SentimentTrend(long projectId, long? fromKey, long? toKey)
+    {
+        using var connection = _db.Open();
+        using var command = connection.CreateCommand();
+        command.Parameters.AddWithValue("$pid", projectId);
+        var where = ScopeWhere(TimeScope.Root, fromKey, toKey, command);
+        command.CommandText = $"""
+            SELECT d.year AS yr, d.month AS mo, d.month_label AS molabel,
+                   AVG(f.sentiment_score) AS avg, COUNT(f.sentiment_score) AS n
+            FROM fact_response f
+            JOIN dim_date d ON f.date_key = d.date_key
+            WHERE {where} AND f.sentiment_score IS NOT NULL
+            GROUP BY d.year, d.month
+            ORDER BY d.year, d.month;
+            """;
+
+        var points = new List<SentimentTrendPoint>();
+        using var reader = command.ExecuteReader();
+        while (reader.Read())
+            points.Add(new SentimentTrendPoint(
+                reader.GetInt32(0), reader.GetInt32(1), reader.GetString(2), reader.GetDouble(3), reader.GetInt32(4)));
+        return points;
     }
 
     // The individual responses on a given weekday within the window (the 曜日 view's terminal 個票一覧).
