@@ -233,6 +233,7 @@ public sealed class MainForm : Form
             case nameof(MainWindowViewModel.CurrentProject):
             case nameof(MainWindowViewModel.IsProjectOpen):
             case nameof(MainWindowViewModel.IsTimeExpanded):
+            case nameof(MainWindowViewModel.IsTopicExpanded):
                 RebuildSidebar();
                 break;
         }
@@ -348,7 +349,18 @@ public sealed class MainForm : Form
                 AddRow(nav, SubNavButton("曜日", () => _shell.OpenWeekdayCommand.Execute(null)));
             }
             AddRow(nav, NavButton(Icons.Bullet, "地域別", () => _shell.OpenSliceCommand.Execute(SliceKind.Region)));
-            AddRow(nav, NavButton(Icons.Bullet, "トピック別", () => _shell.OpenSliceCommand.Execute(SliceKind.Topic)));
+            // トピック別 is an expandable section: one sub-item per 自由記述 question (built dynamically from
+            // the project), each opening that question's own topic report.
+            AddRow(nav, NavButton(_shell.IsTopicExpanded ? Icons.Expand : Icons.Collapse, "トピック別", () => _shell.ToggleTopicCommand.Execute(null)));
+            if (_shell.IsTopicExpanded)
+            {
+                var questions = _shell.FreeTextQuestions;
+                if (questions.Count == 0)
+                    AddRow(nav, SubNavHint("（自由記述の質問がありません）"));
+                else
+                    foreach (var (id, name) in questions)
+                        AddRow(nav, SubNavButton(name, () => _shell.OpenTopicQuestion(id)));
+            }
         }
 
         // Trailing filler row absorbs the leftover height so the nav buttons stay tight at the top
@@ -472,6 +484,18 @@ public sealed class MainForm : Form
         AutoSize = true,
         Anchor = AnchorStyles.Left,
         Margin = new Padding(LogicalToDeviceUnits(NavTextIndentDip), 24, 0, 4),
+    };
+
+    // A faint, indented hint shown in place of sub-nav items when a section has none (e.g. トピック別 with
+    // no 自由記述 questions). Indented to line up with the sub-nav item text.
+    private Label SubNavHint(string text) => new()
+    {
+        Text = text,
+        ForeColor = Theme.SectionHeader,
+        Font = Theme.Font(8.5f),
+        AutoSize = true,
+        Anchor = AnchorStyles.Left,
+        Margin = new Padding(LogicalToDeviceUnits(28), LogicalToDeviceUnits(2), 0, 0),
     };
 
     // A thin divider line between the project actions and 設定 (stretches to the column).

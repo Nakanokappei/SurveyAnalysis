@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Linq;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using SurveyAnalysis.Data;
@@ -175,6 +176,28 @@ public partial class MainWindowViewModel : ViewModelBase
     {
         if (CurrentProject is { } project)
             CurrentPage = new SliceViewModel(project, _analytics, kind);
+    }
+
+    // トピック別をサイドメニューで開閉（自由記述の質問ごとのサブメニューを出す）。
+    [ObservableProperty]
+    private bool _isTopicExpanded;
+
+    [RelayCommand]
+    private void ToggleTopic() => IsTopicExpanded = !IsTopicExpanded;
+
+    // 自由記述（質問）の一覧。トピック別はこの各質問を動的なサブメニュー項目にし、質問ごとの個別レポートを開く。
+    public IReadOnlyList<(long Id, string Name)> FreeTextQuestions =>
+        CurrentProject?.Fields
+            .Where(f => f.FieldType == FieldType.FreeText && f.Id > 0 && !string.IsNullOrWhiteSpace(f.Name))
+            .Select(f => (f.Id, f.Name))
+            .ToList()
+        ?? new List<(long Id, string Name)>();
+
+    // トピック別 → ある質問のトピックレポート（その質問のトピック・感情・個票）を開く。
+    public void OpenTopicQuestion(long fieldId)
+    {
+        if (CurrentProject is { } project)
+            CurrentPage = new SliceViewModel(project, _analytics, SliceKind.Topic, fieldId);
     }
 
     // 時間別をサイドメニューで開閉（期間 / 曜日 のサブメニューを出す）。

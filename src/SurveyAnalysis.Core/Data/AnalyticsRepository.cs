@@ -224,17 +224,24 @@ public sealed class AnalyticsRepository
 
     // The 個票 for one topic group in the window — the トピック別 view's terminal. Matches responses whose
     // 自由記述 was assigned this topic (fact_response_topic); （未分析） matches responses with no topic.
-    public IReadOnlyList<ResponseAnalysis> ResponsesWithAnalysisForTopic(long projectId, string topicLabel, long? fromKey, long? toKey)
+    public IReadOnlyList<ResponseAnalysis> ResponsesWithAnalysisForTopic(long projectId, string topicLabel, long? fromKey, long? toKey, long? topicFieldId = null)
     {
         using var connection = _db.Open();
         using var command = connection.CreateCommand();
         command.Parameters.AddWithValue("$pid", projectId);
+        // When the topic report is scoped to one 質問 (自由記述 column), match only that column's topic.
+        var fieldClause = "";
+        if (topicFieldId is { } tf)
+        {
+            fieldClause = " AND z.field_id = $tf";
+            command.Parameters.AddWithValue("$tf", tf);
+        }
         string topicWhere;
         if (topicLabel == UnanalyzedTopic)
-            topicWhere = "NOT EXISTS (SELECT 1 FROM fact_response_topic z WHERE z.fact_id = f.fact_id AND z.topic_key IS NOT NULL)";
+            topicWhere = $"NOT EXISTS (SELECT 1 FROM fact_response_topic z WHERE z.fact_id = f.fact_id AND z.topic_key IS NOT NULL{fieldClause})";
         else
         {
-            topicWhere = "EXISTS (SELECT 1 FROM fact_response_topic z JOIN dim_topic zt ON zt.topic_key = z.topic_key WHERE z.fact_id = f.fact_id AND zt.label = $label)";
+            topicWhere = $"EXISTS (SELECT 1 FROM fact_response_topic z JOIN dim_topic zt ON zt.topic_key = z.topic_key WHERE z.fact_id = f.fact_id AND zt.label = $label{fieldClause})";
             command.Parameters.AddWithValue("$label", topicLabel);
         }
         command.CommandText = AnalysisSelect
@@ -380,7 +387,7 @@ public sealed class AnalyticsRepository
     // small and this keeps the per-field logic in one place.
     public AnalysisTable AggregateRows(
         long projectId, AnalysisGrouping grouping, TimeScope scope,
-        long? fromKey, long? toKey, IReadOnlyList<AnalysisColumn> columns, long? choiceFieldId = null)
+        long? fromKey, long? toKey, IReadOnlyList<AnalysisColumn> columns, long? choiceFieldId = null, long? topicFieldId = null)
     {
         using var connection = _db.Open();
         using var command = connection.CreateCommand();
@@ -388,6 +395,16 @@ public sealed class AnalyticsRepository
         var where = ScopeWhere(scope, fromKey, toKey, command);
         if (grouping == AnalysisGrouping.Choice)
             command.Parameters.AddWithValue("$cf", choiceFieldId ?? 0);
+
+        // トピック別 can be scoped to one 自由記述 column (a single 質問): the topic bridge join is then
+        // narrowed to that field, so a multi-question project reports each question's own topics + sentiment.
+        // Unscoped (null), it spans every 自由記述 column as before.
+        var topicJoin = "";
+        if (grouping == AnalysisGrouping.Topic && topicFieldId is { } tf)
+        {
+            topicJoin = " AND frt.field_id = $tf";
+            command.Parameters.AddWithValue("$tf", tf);
+        }
 
         // Time and 曜日 read from the date dimension; 地域/トピック/選択肢 join their own dimension. The
         // answer tail (rid / sentiment / field / value) is identical, so the in-memory aggregator is
@@ -443,7 +460,7 @@ public sealed class AnalyticsRepository
                 SELECT COALESCE(t.label, '（未分析）') AS glabel,
                        r.id AS rid, frt.sentiment_score AS sscore, fl.name AS fname, a.value AS val
                 FROM fact_response f
-                LEFT JOIN fact_response_topic frt ON frt.fact_id = f.fact_id
+                LEFT JOIN fact_response_topic frt ON frt.fact_id = f.fact_id{topicJoin}
                 LEFT JOIN dim_topic t ON frt.topic_key = t.topic_key
                 JOIN responses r ON r.id = f.response_id
                 LEFT JOIN answers a ON a.response_id = r.id

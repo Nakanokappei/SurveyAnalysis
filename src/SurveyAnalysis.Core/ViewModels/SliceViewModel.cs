@@ -20,6 +20,8 @@ public partial class SliceViewModel : PeriodScopedViewModel
     private readonly AnalysisGrouping _grouping;
     private readonly string? _dateFieldName;
     private readonly string? _excerptFieldName;
+    // > 0 when this is a per-質問 topic report scoped to one 自由記述 column; 0 means region / all-column.
+    private readonly long _topicFieldId;
 
     public string Title { get; }
     public string Description { get; }
@@ -57,32 +59,39 @@ public partial class SliceViewModel : PeriodScopedViewModel
     public bool ShowRows => HasData && !IsResponseView;
     public bool ShowResponses => HasData && IsResponseView;
 
-    public SliceViewModel(Project project, AnalyticsRepository analytics, SliceKind kind)
+    // topicFieldId > 0 makes this a topic report for one 質問 (自由記述 column): its topics are the rows,
+    // its per-column sentiment the 感情極性, and the report title is the question name. The トピック別 sidebar
+    // entry opens one of these per 自由記述 question (a dynamic submenu).
+    public SliceViewModel(Project project, AnalyticsRepository analytics, SliceKind kind, long topicFieldId = 0)
     {
         _analytics = analytics;
         _projectId = project.Id;
         _grouping = kind == SliceKind.Topic ? AnalysisGrouping.Topic : AnalysisGrouping.Region;
+        _topicFieldId = topicFieldId;
         DimensionTitle = kind == SliceKind.Topic ? "トピック" : "地域";
 
-        Title = SliceInfo.Label(kind);
+        var topicField = topicFieldId > 0 ? project.Fields.FirstOrDefault(f => f.Id == topicFieldId) : null;
+
+        Title = topicField?.Name ?? SliceInfo.Label(kind);
         Description = kind switch
         {
             SliceKind.Region => "回答を地域（住所・都道府県・市区町村）ごとに集計します。行をクリックすると個票を表示します。",
+            SliceKind.Topic when topicField is not null => $"「{topicField.Name}」の回答をトピックごとに集計します。感情極性はトピックごとの平均です。行をクリックすると個票を表示します。",
             SliceKind.Topic => "回答をトピックごとに集計します。感情極性はトピックごとの平均です。行をクリックすると個票を表示します。",
             _ => ""
         };
 
-        // The grouping field (都道府県/住所/市区町村 for 地域, the topic field for トピック) is the rows,
-        // so it is not also shown as a column.
-        var groupingField = kind == SliceKind.Topic
-            ? AnalyticsRepository.TopicField(project)
-            : AnalyticsRepository.RegionField(project);
+        // The grouping basis is the rows, so it is not also a column: the question field for a scoped topic
+        // report, else the region field (an all-column topic report excludes its Analysis=Topic field).
+        var groupingField = topicField?.Name
+            ?? (kind == SliceKind.Topic ? AnalyticsRepository.TopicField(project) : AnalyticsRepository.RegionField(project));
         Columns = ColumnsFor(project, groupingField);
 
-        // 個票 fields: 記入日 from the aggregation date, the excerpt from a free-text (or sentiment) field.
+        // 個票 fields: 記入日 from the aggregation date; the excerpt is the scoped question's text (else the
+        // first free-text / sentiment field).
         _dateFieldName = AnalyticsRepository.DateField(project);
-        _excerptFieldName =
-            project.Fields.FirstOrDefault(f => f.FieldType == FieldType.FreeText)?.Name
+        _excerptFieldName = topicField?.Name
+            ?? project.Fields.FirstOrDefault(f => f.FieldType == FieldType.FreeText)?.Name
             ?? project.Fields.FirstOrDefault(f => f.Analysis == AnalysisMethod.Sentiment)?.Name;
 
         // Keep the star current with the latest imported responses.
@@ -100,7 +109,7 @@ public partial class SliceViewModel : PeriodScopedViewModel
 
         var (from, to) = Window;
         var responses = _grouping == AnalysisGrouping.Topic
-            ? _analytics.ResponsesWithAnalysisForTopic(_projectId, row.Label, from, to)
+            ? _analytics.ResponsesWithAnalysisForTopic(_projectId, row.Label, from, to, _topicFieldId > 0 ? _topicFieldId : null)
             : _analytics.ResponsesWithAnalysisForRegion(_projectId, row.Label, from, to);
 
         TotalRow = null;   // the 個票 list has no column table
@@ -132,7 +141,7 @@ public partial class SliceViewModel : PeriodScopedViewModel
         IsResponseView = false;
         var (from, to) = Window;
         SentimentTrend = _analytics.SentimentTrend(_projectId, from, to);
-        var table = _analytics.AggregateRows(_projectId, _grouping, TimeScope.Root, from, to, Columns);
+        var table = _analytics.AggregateRows(_projectId, _grouping, TimeScope.Root, from, to, Columns, topicFieldId: _topicFieldId > 0 ? _topicFieldId : null);
 
         Rows.Clear();
         foreach (var row in table.Rows)

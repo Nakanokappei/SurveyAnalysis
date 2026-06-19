@@ -78,6 +78,63 @@ public class AnalyticsSentimentTests
     }
 
     [Fact]
+    public void Topic_report_can_be_scoped_to_one_question()
+    {
+        using var temp = new TempDatabase();
+        var projects = new ProjectRepository(temp.Db);
+        var responses = new ResponseRepository(temp.Db);
+        var topics = new TopicRepository(temp.Db);
+        var results = new AnalysisResultsRepository(temp.Db);
+        var analytics = new AnalyticsRepository(temp.Db);
+
+        // Two 自由記述 questions, each with its own topic dictionary.
+        var project = new Project { Name = "P" };
+        project.Fields.Add(new DataField { Name = "記入日", FieldType = FieldType.Date, UseForAggregation = true });
+        var opinion = new DataField { Name = "ご意見", FieldType = FieldType.FreeText };
+        var improve = new DataField { Name = "改善点", FieldType = FieldType.FreeText };
+        project.Fields.Add(opinion);
+        project.Fields.Add(improve);
+        var pid = projects.Insert(project);
+
+        responses.InsertResponses(pid, "t", new[]
+        {
+            Response(("記入日", "2026/05/11"), ("ご意見", "良い"), ("改善点", "高い")),
+            Response(("記入日", "2026/05/12"), ("ご意見", "とても良い"), ("改善点", "やや高い")),
+        });
+
+        topics.ReplaceTopics(opinion.Id, new (string, float[]?)[] { ("満足", null) });
+        topics.ReplaceTopics(improve.Id, new (string, float[]?)[] { ("価格", null) });
+        var satisfied = topics.ListTopics(opinion.Id).Single().Id;
+        var price = topics.ListTopics(improve.Id).Single().Id;
+
+        foreach (var (id, _) in responses.LoadForProjectWithIds(pid))
+        {
+            results.SaveRowSentiment(id, 0.5, false);
+            results.SaveTopicAssignment(id, opinion.Id, satisfied, 0.8, false);
+            results.SaveTopicAssignment(id, improve.Id, price, -0.3, true);
+        }
+        analytics.Rebuild(project);
+        var noColumns = Array.Empty<AnalysisColumn>();
+
+        // Scoped to ご意見: only its topic 満足, with its own (+0.80) sentiment.
+        var byOpinion = analytics.AggregateRows(pid, AnalysisGrouping.Topic, TimeScope.Root, null, null, noColumns, topicFieldId: opinion.Id).Rows;
+        Assert.Equal(new[] { "満足" }, byOpinion.Select(r => r.Label).ToArray());
+        Assert.Equal("+0.80", byOpinion.Single().Sentiment);
+
+        // Scoped to 改善点: only its topic 価格 (-0.30).
+        var byImprove = analytics.AggregateRows(pid, AnalysisGrouping.Topic, TimeScope.Root, null, null, noColumns, topicFieldId: improve.Id).Rows;
+        Assert.Equal(new[] { "価格" }, byImprove.Select(r => r.Label).ToArray());
+        Assert.Equal("-0.30", byImprove.Single().Sentiment);
+
+        // Unscoped spans both questions' topics.
+        var all = analytics.AggregateRows(pid, AnalysisGrouping.Topic, TimeScope.Root, null, null, noColumns).Rows;
+        Assert.Equal(new[] { "価格", "満足" }, all.Select(r => r.Label).OrderBy(l => l).ToArray());
+
+        // The scoped topic 個票 returns the responses assigned that question's topic.
+        Assert.Equal(2, analytics.ResponsesWithAnalysisForTopic(pid, "満足", null, null, opinion.Id).Count);
+    }
+
+    [Fact]
     public void Region_and_topic_drilldown_return_responses_with_analysis()
     {
         var (temp, analytics, pid) = Seed();
