@@ -67,9 +67,11 @@ internal static class SliceTableView
     public static DataGridView BuildAnalysisGrid(string dimensionHeader, IReadOnlyList<AnalysisColumn> columns)
     {
         var grid = NewGrid();
-        grid.Columns.Add(TextColumn(dimensionHeader, fillWeight: 28));
+        grid.Columns.Add(TextColumn(dimensionHeader, fillWeight: 26));
+        // A dedicated 感情極性 column right after the dimension, shown in every report.
+        grid.Columns.Add(TextColumn("感情極性\n平均", fillWeight: 16));
         foreach (var col in columns)
-            grid.Columns.Add(TextColumn($"{col.Name}\n{col.AggregationLabel}", fillWeight: 18));
+            grid.Columns.Add(TextColumn($"{col.Name}\n{col.AggregationLabel}", fillWeight: 16));
         grid.ColumnHeadersDefaultCellStyle.WrapMode = DataGridViewTriState.True;
         grid.ColumnHeadersHeightSizeMode = DataGridViewColumnHeadersHeightSizeMode.AutoSize;
         return grid;
@@ -178,13 +180,15 @@ internal static class SliceTableView
     private static DataGridViewTextBoxColumn TextColumn(string header, int fillWeight) =>
         new() { HeaderText = header, FillWeight = fillWeight, SortMode = DataGridViewColumnSortMode.NotSortable };
 
-    // Flattens an AnalysisRow into grid cells: the dimension label first, then one cell per column.
+    // Flattens an AnalysisRow into grid cells: the dimension label, the 感情極性 measure, then one cell
+    // per field column (the order must match BuildAnalysisGrid).
     private static object[] Cells(AnalysisRow row)
     {
-        var cells = new object[1 + row.Cells.Count];
+        var cells = new object[2 + row.Cells.Count];
         cells[0] = row.Label;
+        cells[1] = row.Sentiment;
         for (var i = 0; i < row.Cells.Count; i++)
-            cells[i + 1] = row.Cells[i];
+            cells[i + 2] = row.Cells[i];
         return cells;
     }
 }

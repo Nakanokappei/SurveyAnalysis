@@ -160,7 +160,7 @@ public partial class TimeSliceViewModel : PeriodScopedViewModel
         if (IsTerminal)
         {
             TotalRow = null;
-            foreach (var response in _analytics.ResponsesForScope(_projectId, scope, from, to))
+            foreach (var response in _analytics.ResponsesWithAnalysisForScope(_projectId, scope, from, to))
                 Responses.Add(ResponseRowFactory.Build(_dateFieldName, _excerptFieldName, response));
             ChildLevelTitle = "回答一覧";
             ScopeSummary = $"合計 {Responses.Count} 件";

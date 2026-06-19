@@ -128,7 +128,7 @@ public partial class WeekdaySliceViewModel : PeriodScopedViewModel
         var (from, to) = Window;
         TotalRow = null; // the 個票 list has no column table
         Responses.Clear();
-        foreach (var response in _analytics.ResponsesForWeekday(_projectId, dayOfWeek, from, to))
+        foreach (var response in _analytics.ResponsesWithAnalysisForWeekday(_projectId, dayOfWeek, from, to))
             Responses.Add(ResponseRowFactory.Build(_dateFieldName, _excerptFieldName, response));
 
         Breadcrumbs.Clear();

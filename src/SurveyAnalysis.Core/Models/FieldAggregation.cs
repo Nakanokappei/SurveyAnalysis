@@ -47,9 +47,10 @@ public sealed record AnalysisColumn(string Name, FieldAggregation Aggregation)
 }
 
 // One row of the analysis table: the dimension label, one formatted cell per AnalysisColumn (aligned
-// by position), the response count (drives the summary, not a column), and — for the drillable time
-// dimension — the scope to open when the row is clicked.
-public sealed record AnalysisRow(string Label, IReadOnlyList<string> Cells, int Count, TimeScope? ChildScope);
+// by position), the response count (drives the summary, not a column), the group's average 感情極性
+// (a dedicated column shown in every report — "+0.00" / "—"), and — for the drillable time dimension —
+// the scope to open when the row is clicked.
+public sealed record AnalysisRow(string Label, IReadOnlyList<string> Cells, int Count, TimeScope? ChildScope, string Sentiment = "—");
 
 // The full analysis table: the per-group rows plus a 全体 total row. The total row aggregates every
 // column over all responses with that column's own method — 種類数 counts the distinct values across

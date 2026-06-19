@@ -159,30 +159,119 @@ public sealed class AnalyticsRepository
     // (no drill) within the 集計期間 window.
     public IReadOnlyList<ResponseAnalysis> ResponsesWithAnalysisForScope(
         long projectId, long? fromKey, long? toKey, bool newestFirst = false)
+        => ResponsesWithAnalysisForScope(projectId, TimeScope.Root, fromKey, toKey, newestFirst);
+
+    // As above but for a specific drill scope, so the 期間 view's 日 terminal 個票 also carry each
+    // response's 感情 / トピック.
+    public IReadOnlyList<ResponseAnalysis> ResponsesWithAnalysisForScope(
+        long projectId, TimeScope scope, long? fromKey, long? toKey, bool newestFirst = false)
     {
         using var connection = _db.Open();
         using var command = connection.CreateCommand();
         command.Parameters.AddWithValue("$pid", projectId);
-        var where = ScopeWhere(TimeScope.Root, fromKey, toKey, command);
-        var order = newestFirst ? "DESC" : "ASC";
-        command.CommandText = $"""
-            SELECT r.id, f.sentiment_score AS sscore, f.is_negative AS sneg, t.label AS topic,
-                   fl.name AS fname, a.value AS val
-            FROM fact_response f
-            JOIN dim_date d ON f.date_key = d.date_key
-            JOIN responses r ON r.id = f.response_id
-            LEFT JOIN dim_topic t ON f.main_topic_key = t.topic_key
-            LEFT JOIN answers a ON a.response_id = r.id
-            LEFT JOIN fields fl ON fl.id = a.field_id
-            WHERE {where}
-            ORDER BY r.id {order};
-            """;
+        var where = ScopeWhere(scope, fromKey, toKey, command);
+        command.CommandText = AnalysisSelect
+            + "JOIN dim_date d ON f.date_key = d.date_key "
+            + "JOIN responses r ON r.id = f.response_id "
+            + "LEFT JOIN dim_topic t ON f.main_topic_key = t.topic_key "
+            + "LEFT JOIN answers a ON a.response_id = r.id "
+            + "LEFT JOIN fields fl ON fl.id = a.field_id "
+            + $"WHERE {where} ORDER BY r.id {(newestFirst ? "DESC" : "ASC")};";
+        return ReadAnalysisMaps(command);
+    }
 
-        // Group the joined rows by response: the first row fixes its (constant) analysis, the rest
-        // accumulate its answer values into the field-name→value map.
+    // The 個票 (with 感情 / トピック) for one weekday in the window — the 曜日 view's terminal.
+    public IReadOnlyList<ResponseAnalysis> ResponsesWithAnalysisForWeekday(long projectId, int dayOfWeek, long? fromKey, long? toKey)
+    {
+        using var connection = _db.Open();
+        using var command = connection.CreateCommand();
+        command.Parameters.AddWithValue("$pid", projectId);
+        command.Parameters.AddWithValue("$dow", dayOfWeek);
+        command.CommandText = AnalysisSelect
+            + "JOIN dim_date d ON f.date_key = d.date_key "
+            + "JOIN responses r ON r.id = f.response_id "
+            + "LEFT JOIN dim_topic t ON f.main_topic_key = t.topic_key "
+            + "LEFT JOIN answers a ON a.response_id = r.id "
+            + "LEFT JOIN fields fl ON fl.id = a.field_id "
+            + $"WHERE f.project_id = $pid AND d.day_of_week = $dow{Window(fromKey, toKey, command)} ORDER BY r.id;";
+        return ReadAnalysisMaps(command);
+    }
+
+    // The 個票 for one 都道府県 group in the window — the 地域別 view's terminal. The （未設定） group
+    // (responses with no parsed region) is matched by a null region_key rather than a prefecture value.
+    public IReadOnlyList<ResponseAnalysis> ResponsesWithAnalysisForRegion(long projectId, string prefecture, long? fromKey, long? toKey)
+    {
+        using var connection = _db.Open();
+        using var command = connection.CreateCommand();
+        command.Parameters.AddWithValue("$pid", projectId);
+        string regionWhere;
+        if (prefecture == UnsetRegion)
+            regionWhere = "f.region_key IS NULL";
+        else
+        {
+            regionWhere = "g.prefecture = $pref";
+            command.Parameters.AddWithValue("$pref", prefecture);
+        }
+        command.CommandText = AnalysisSelect
+            + "LEFT JOIN dim_region g ON f.region_key = g.region_key "
+            + "JOIN responses r ON r.id = f.response_id "
+            + "LEFT JOIN dim_topic t ON f.main_topic_key = t.topic_key "
+            + "LEFT JOIN answers a ON a.response_id = r.id "
+            + "LEFT JOIN fields fl ON fl.id = a.field_id "
+            + $"WHERE f.project_id = $pid AND {regionWhere}{Window(fromKey, toKey, command)} ORDER BY r.id;";
+        return ReadAnalysisMaps(command);
+    }
+
+    // The 個票 for one topic group in the window — the トピック別 view's terminal. Matches responses whose
+    // 自由記述 was assigned this topic (fact_response_topic); （未分析） matches responses with no topic.
+    public IReadOnlyList<ResponseAnalysis> ResponsesWithAnalysisForTopic(long projectId, string topicLabel, long? fromKey, long? toKey)
+    {
+        using var connection = _db.Open();
+        using var command = connection.CreateCommand();
+        command.Parameters.AddWithValue("$pid", projectId);
+        string topicWhere;
+        if (topicLabel == UnanalyzedTopic)
+            topicWhere = "NOT EXISTS (SELECT 1 FROM fact_response_topic z WHERE z.fact_id = f.fact_id AND z.topic_key IS NOT NULL)";
+        else
+        {
+            topicWhere = "EXISTS (SELECT 1 FROM fact_response_topic z JOIN dim_topic zt ON zt.topic_key = z.topic_key WHERE z.fact_id = f.fact_id AND zt.label = $label)";
+            command.Parameters.AddWithValue("$label", topicLabel);
+        }
+        command.CommandText = AnalysisSelect
+            + "JOIN responses r ON r.id = f.response_id "
+            + "LEFT JOIN dim_topic t ON f.main_topic_key = t.topic_key "
+            + "LEFT JOIN answers a ON a.response_id = r.id "
+            + "LEFT JOIN fields fl ON fl.id = a.field_id "
+            + $"WHERE f.project_id = $pid AND {topicWhere}{Window(fromKey, toKey, command)} ORDER BY r.id;";
+        return ReadAnalysisMaps(command);
+    }
+
+    // The shared SELECT prefix (the column order ReadAnalysisMaps expects); callers append the joins and
+    // their dimension's WHERE.
+    private const string AnalysisSelect =
+        "SELECT r.id, f.sentiment_score AS sscore, f.is_negative AS sneg, t.label AS topic, fl.name AS fname, a.value AS val "
+        + "FROM fact_response f ";
+
+    private const string UnsetRegion = "（未設定）";
+    private const string UnanalyzedTopic = "（未分析）";
+
+    // Appends the 集計期間 window predicate when both bounds are present, binding $from/$to onto the command.
+    private static string Window(long? fromKey, long? toKey, SqliteCommand command)
+    {
+        if (fromKey is not { } fk || toKey is not { } tk)
+            return "";
+        command.Parameters.AddWithValue("$from", fk);
+        command.Parameters.AddWithValue("$to", tk);
+        return " AND f.date_key BETWEEN $from AND $to";
+    }
+
+    // Reads an analysis 個票 query (r.id, sscore, sneg, topic, fname, val) into one ResponseAnalysis per
+    // response, in row order: the first row fixes its (constant) analysis, the rest accumulate answers.
+    private static IReadOnlyList<ResponseAnalysis> ReadAnalysisMaps(SqliteCommand command)
+    {
         var values = new Dictionary<long, Dictionary<string, string>>();
         var analysis = new Dictionary<long, (double? Score, bool IsNegative, string? Topic)>();
-        var order2 = new List<long>();
+        var order = new List<long>();
         using var reader = command.ExecuteReader();
         while (reader.Read())
         {
@@ -194,12 +283,12 @@ public sealed class AnalyticsRepository
                     reader.IsDBNull(1) ? null : reader.GetDouble(1),
                     !reader.IsDBNull(2) && reader.GetInt32(2) != 0,
                     reader.IsDBNull(3) ? null : reader.GetString(3));
-                order2.Add(id);
+                order.Add(id);
             }
             if (!reader.IsDBNull(4))
                 map[reader.GetString(4)] = reader.IsDBNull(5) ? "" : reader.GetString(5);
         }
-        return order2
+        return order
             .Select(id => new ResponseAnalysis(values[id], analysis[id].Score, analysis[id].IsNegative, analysis[id].Topic))
             .ToList();
     }
@@ -346,11 +435,16 @@ public sealed class AnalyticsRepository
                 LEFT JOIN fields fl ON fl.id = a.field_id
                 WHERE {where};
                 """,
+            // トピック別 groups by the per-自由記述-column topic assignment (fact_response_topic), and its
+            // 感情極性 column is that topic's own sentiment (frt.sentiment_score) — not the row sentiment.
+            // A response with no topic falls in （未分析）; with several 自由記述 columns it appears under
+            // each column's topic.
             _ => $"""
                 SELECT COALESCE(t.label, '（未分析）') AS glabel,
-                       r.id AS rid, f.sentiment_score AS sscore, fl.name AS fname, a.value AS val
+                       r.id AS rid, frt.sentiment_score AS sscore, fl.name AS fname, a.value AS val
                 FROM fact_response f
-                LEFT JOIN dim_topic t ON f.main_topic_key = t.topic_key
+                LEFT JOIN fact_response_topic frt ON frt.fact_id = f.fact_id
+                LEFT JOIN dim_topic t ON frt.topic_key = t.topic_key
                 JOIN responses r ON r.id = f.response_id
                 LEFT JOIN answers a ON a.response_id = r.id
                 LEFT JOIN fields fl ON fl.id = a.field_id
@@ -393,14 +487,15 @@ public sealed class AnalyticsRepository
         };
 
         var rows = ordered
-            .Select(g => new AnalysisRow(g.Label, columns.Select(c => g.Cell(c)).ToList(), g.Sentiment.Count, g.Child))
+            .Select(g => new AnalysisRow(g.Label, columns.Select(c => g.Cell(c)).ToList(), g.Sentiment.Count, g.Child, g.SentimentCell()))
             .ToList();
 
         // 全体 row: each column is aggregated over all responses with its own method — 種類数 counts the
-        // distinct values across the whole set (not the response count), 合計 sums, 平均 averages.
+        // distinct values across the whole set (not the response count), 合計 sums, 平均 averages — plus
+        // the overall average 感情極性.
         var totalCount = grand.Sentiment.Count;
         var totalCells = columns.Select(c => grand.Cell(c)).ToList();
-        return new AnalysisTable(rows, new AnalysisRow("全体", totalCells, totalCount, null));
+        return new AnalysisTable(rows, new AnalysisRow("全体", totalCells, totalCount, null, grand.SentimentCell()));
     }
 
     // Extracts a group's identity (dedupe key, display label, drill scope, sort key) from a raw row.
@@ -494,7 +589,11 @@ public sealed class AnalyticsRepository
             _ => SentimentCell(),
         };
 
-        private string SentimentCell()
+        // The group's average 感情極性, shown as its own column in every report ("+0.00" / "—" when none
+        // of the group's responses are scored). For the time/region/weekday/choice groupings this averages
+        // the row sentiment (fact_response.sentiment_score); for トピック別 it averages the per-topic
+        // sentiment (fact_response_topic.sentiment_score), since that query feeds that score in as sscore.
+        public string SentimentCell()
         {
             var scores = Sentiment.Values.Where(v => v.HasValue).Select(v => v!.Value).ToList();
             return scores.Count == 0 ? "—" : scores.Average().ToString("+0.00;-0.00;0.00");
