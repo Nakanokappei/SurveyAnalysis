@@ -6,8 +6,10 @@ namespace SurveyAnalysis.Data;
 // A dependency-free spherical k-means for clustering embedding vectors into topics. Vectors are
 // L2-normalised, so Euclidean geometry on the unit sphere matches cosine similarity (the measure topic
 // assignment uses). Initialisation is k-means++ over cosine distance; the cluster count is chosen
-// automatically by maximising the mean silhouette over k = 2 .. min(⌊√n⌋, maxK). A fixed seed keeps the
-// result deterministic (important for tests and for a stable dictionary across re-runs).
+// automatically over k = 2 .. min(⌊√n⌋, maxK) by a parsimony rule — the SMALLEST k whose mean silhouette
+// is within 10% of the best — so weakly-separated survey opinions are not over-split into many
+// near-duplicate topics. A fixed seed keeps the result deterministic (important for tests and for a
+// stable dictionary across re-runs).
 public static class KMeans
 {
     // The assignment (cluster index per input vector) and the unit-length centroids.
@@ -28,20 +30,36 @@ public static class KMeans
         if (n < 4 || upperK < 2)
             return new Result(new int[n], new[] { Mean(points, new int[n], 0, 1)[0] });
 
-        // Search k for the best mean silhouette; keep the best partition.
-        Result? best = null;
-        var bestScore = double.NegativeInfinity;
+        // Score every k, then choose by parsimony: the SMALLEST k whose mean silhouette is within 10% of
+        // the best. Short, weakly-separated survey opinions otherwise push the silhouette to keep climbing
+        // with k, splitting one topic into several near-duplicates; preferring fewer clusters when more
+        // barely help keeps the topic set interpretable. Clearly-separated data still picks its natural k
+        // (smaller counts fall well below the threshold). A non-positive best means no real structure, so
+        // take the fewest clusters (k = 2).
+        var candidates = new List<(double Score, Result Result)>();   // ascending k order
         for (var k = 2; k <= Math.Min(upperK, n - 1); k++)
         {
             var (assignments, centroids) = Lloyd(points, k, seed);
-            var score = Silhouette(points, assignments, k);
-            if (score > bestScore)
-            {
-                bestScore = score;
-                best = new Result(assignments, centroids);
-            }
+            candidates.Add((Silhouette(points, assignments, k), new Result(assignments, centroids)));
         }
-        return best!;
+
+        var bestScore = double.NegativeInfinity;
+        foreach (var candidate in candidates)
+            bestScore = Math.Max(bestScore, candidate.Score);
+        if (bestScore <= 0)
+            return candidates[0].Result;
+
+        // Absolute (not relative) tolerance: a silhouette improvement smaller than this is treated as noise,
+        // so a larger k must beat the simplest qualifying one by a real margin. Survey-opinion embeddings
+        // cluster only weakly (silhouettes ~0.05–0.15) and the score tends to creep up to the k cap, so a
+        // relative rule never trims; an absolute margin does, while clearly-separated data (silhouette gaps
+        // ≫ this) still keeps its natural k.
+        const double tolerance = 0.05;
+        var threshold = bestScore - tolerance;
+        foreach (var candidate in candidates)   // ascending k → the first within threshold is the smallest
+            if (candidate.Score >= threshold)
+                return candidate.Result;
+        return candidates[^1].Result;   // the best always qualifies; kept for definite assignment
     }
 
     // One k-means run: k-means++ seeding, then Lloyd iterations until the assignment is stable.

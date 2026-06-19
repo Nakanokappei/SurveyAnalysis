@@ -61,6 +61,19 @@ public class KMeansTests
     }
 
     [Fact]
+    public void Cluster_with_no_structure_takes_the_fewest_clusters()
+    {
+        // Twelve identical vectors (⌊√12⌋ = 3 would allow three): with no separation every partition has a
+        // zero mean silhouette, so the parsimony rule must take the fewest clusters rather than split a
+        // single blob into the maximum k.
+        var vectors = Enumerable.Range(0, 12).Select(_ => new[] { 1f, 0f, 0f }).ToList();
+
+        var result = KMeans.Cluster(vectors);
+
+        Assert.Equal(2, result.Centroids.Count);
+    }
+
+    [Fact]
     public void Cluster_handles_identical_vectors_without_throwing()
     {
         var vectors = Enumerable.Range(0, 8).Select(_ => new[] { 1f, 0f, 0f }).ToList();
