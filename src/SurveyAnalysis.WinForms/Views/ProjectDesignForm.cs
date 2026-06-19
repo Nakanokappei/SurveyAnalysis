@@ -117,7 +117,15 @@ internal sealed class ProjectDesignForm : Form
 
         // Two tabs over a shared action bar: 全般 (name / description / data items) and トピック (the
         // per-column topic dictionary). The bar (cancel / confirm / delete) stays below both tabs.
-        _tabs = new TabControl { Dock = DockStyle.Fill, Font = Theme.Font(10f) };
+        // Tabs sized to their own labels (SizeMode.Normal) with left/right + top/bottom padding so the
+        // width follows the 文字数 rather than a fixed block.
+        _tabs = new TabControl
+        {
+            Dock = DockStyle.Fill,
+            Font = Theme.Font(10f),
+            SizeMode = TabSizeMode.Normal,
+            Padding = new Point(LogicalToDeviceUnits(16), LogicalToDeviceUnits(5)),
+        };
         _tabs.TabPages.Add(BuildGeneralTab());
         _tabs.TabPages.Add(BuildTopicsTab());
         _tabs.SelectedIndexChanged += (_, _) => { if (_tabs.SelectedIndex == 1) RefreshTopicColumns(); };

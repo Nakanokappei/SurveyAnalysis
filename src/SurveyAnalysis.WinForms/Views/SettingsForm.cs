@@ -63,7 +63,16 @@ internal sealed class SettingsForm : Form
 
         // Owner-drawn tabs so the selected tab can be bold + accent-coloured (the default control gives
         // no per-tab font), making the current tab obvious.
-        _tabs = new TabControl { Dock = DockStyle.Fill, Font = _tabFont, DrawMode = TabDrawMode.OwnerDrawFixed };
+        // SizeMode.Normal sizes each tab to its own text (so タブ幅 follows the 文字数, not the widest tab),
+        // and Padding adds left/right + top/bottom room around the label.
+        _tabs = new TabControl
+        {
+            Dock = DockStyle.Fill,
+            Font = _tabFont,
+            DrawMode = TabDrawMode.OwnerDrawFixed,
+            SizeMode = TabSizeMode.Normal,
+            Padding = new Point(LogicalToDeviceUnits(16), LogicalToDeviceUnits(5)),
+        };
         _tabs.DrawItem += DrawTab;
         _tabs.TabPages.Add(BuildGeneralTab());
         _tabs.TabPages.Add(BuildMailTab());
@@ -135,9 +144,9 @@ internal sealed class SettingsForm : Form
         var page = NewPage("全般");
         var grid = NewGrid();
         AddRow(grid, "会社名", Bound(new TextBox(), nameof(_vm.CompanyName), 150));
-        AddRow(grid, "画像の読み取りフォルダ", ScanFolderRow());
-        AddRow(grid, "", BoundCheck(new CheckBox { Text = "読み取り後にアーカイブへ移動して二重読み取りを防ぐ", AutoSize = true }, nameof(_vm.ArchiveAfterScan)));
-        AddRow(grid, "アーカイブ先サブフォルダ名", Bound(new TextBox(), nameof(_vm.ArchiveSubfolderName), 110));
+        // The image-read folder is no longer pre-configured here: 「画像から取り込む」 asks for the folder
+        // each time (defaulting to the last-used location), so there is nothing to set in advance.
+        AddRow(grid, "", new Label { Text = "画像の読み取りフォルダは「画像から取り込む」の実行時に毎回選びます（前回の場所が既定）。", AutoSize = true, ForeColor = Theme.Muted, Font = Theme.Font(8.5f), Margin = new Padding(0, 6, 0, 0) });
         page.Controls.Add(grid);
         return page;
     }
@@ -641,37 +650,6 @@ internal sealed class SettingsForm : Form
         box.Width = (int)System.Math.Ceiling(graphics.MeasureString(new string('0', maxDigits + 2), box.Font).Width) + 8;
         var holder = new FlowLayoutPanel { AutoSize = true, AutoSizeMode = AutoSizeMode.GrowAndShrink, WrapContents = false, Margin = new Padding(0) };
         holder.Controls.Add(box);
-        return holder;
-    }
-
-    // The 画像の読み取りフォルダ row: a path text box plus a "選択..." button opening a folder picker.
-    private Control ScanFolderRow()
-    {
-        var box = StyleInput(Bound(new TextBox(), nameof(_vm.ScanFolderPath), 170));
-        var browse = new Button
-        {
-            Text = "選択...",
-            AutoSize = true,
-            FlatStyle = FlatStyle.Flat,
-            BackColor = Color.White,
-            ForeColor = Theme.BodyText,
-            Font = Theme.Font(9f),
-            Cursor = Cursors.Hand,
-            Margin = new Padding(6, 5, 0, 5),
-            Padding = new Padding(8, 3, 8, 3),
-        };
-        browse.FlatAppearance.BorderColor = Theme.CardBorder;
-        browse.FlatAppearance.BorderSize = 1;
-        browse.Click += (_, _) =>
-        {
-            using var dialog = new FolderBrowserDialog { SelectedPath = _vm.ScanFolderPath };
-            if (dialog.ShowDialog(this) == DialogResult.OK)
-                _vm.ScanFolderPath = dialog.SelectedPath;
-        };
-
-        var holder = new FlowLayoutPanel { AutoSize = true, AutoSizeMode = AutoSizeMode.GrowAndShrink, WrapContents = false, Margin = new Padding(0), BackColor = Color.White };
-        holder.Controls.Add(box);
-        holder.Controls.Add(browse);
         return holder;
     }
 

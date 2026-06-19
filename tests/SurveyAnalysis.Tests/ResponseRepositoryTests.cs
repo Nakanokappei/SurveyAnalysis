@@ -85,6 +85,29 @@ public class ResponseRepositoryTests
     }
 
     [Fact]
+    public void LoadChoiceOptions_splits_multiselect_cells_into_distinct_options()
+    {
+        using var temp = new TempDatabase();
+        var projects = new ProjectRepository(temp.Db);
+        var responses = new ResponseRepository(temp.Db);
+
+        var project = new Project { Name = "P" };
+        var choice = new DataField { Name = "加入サービス", FieldType = FieldType.Choice };
+        project.Fields.Add(choice);
+        var pid = projects.Insert(project);
+        responses.InsertResponses(pid, "t.csv", new[]
+        {
+            Response(("加入サービス", "テレビ; インターネット")),
+            Response(("加入サービス", "テレビ; 固定電話")),
+        });
+
+        var options = responses.LoadChoiceOptions(choice.Id);
+
+        // First-seen order, de-duplicated across the multi-select cells.
+        Assert.Equal(new[] { "テレビ", "インターネット", "固定電話" }, options);
+    }
+
+    [Fact]
     public void Responses_are_removed_with_the_project()
     {
         using var temp = new TempDatabase();

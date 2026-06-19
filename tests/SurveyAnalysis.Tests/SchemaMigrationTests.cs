@@ -22,13 +22,15 @@ public class SchemaMigrationTests
     public void Fresh_database_is_at_the_current_raw_version()
     {
         using var temp = new TempDatabase();
-        Assert.Equal(5L, RawVersion(temp));
+        Assert.Equal(6L, RawVersion(temp));
         // v4 artifacts: projects.description and the per-column topic dictionary.
         Assert.Equal(1L, Scalar(temp.Db, "SELECT COUNT(*) FROM pragma_table_info('projects') WHERE name='description';"));
         Assert.Equal(1L, Scalar(temp.Db, "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='field_topics';"));
         // v5 artifacts: the raw analysis-results tables.
         Assert.Equal(1L, Scalar(temp.Db, "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='response_sentiment';"));
         Assert.Equal(1L, Scalar(temp.Db, "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='response_topic';"));
+        // v6 artifact: the image-OCR staging table.
+        Assert.Equal(1L, Scalar(temp.Db, "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='image_import_staging';"));
     }
 
     [Fact]
@@ -37,7 +39,7 @@ public class SchemaMigrationTests
         using var temp = new TempDatabase();
         temp.Db.EnsureSchema();
         temp.Db.EnsureSchema();
-        Assert.Equal(5L, RawVersion(temp));
+        Assert.Equal(6L, RawVersion(temp));
     }
 
     // A v1 database (projects without source_path, user_version 1) migrates forward to the current
@@ -65,7 +67,7 @@ public class SchemaMigrationTests
 
             db.EnsureSchema();
 
-            Assert.Equal(5L, Scalar(db, "PRAGMA user_version;"));
+            Assert.Equal(6L, Scalar(db, "PRAGMA user_version;"));
             Assert.Equal(0L, Scalar(db, "SELECT COUNT(*) FROM pragma_table_info('projects') WHERE name='source_path';")); // dropped in v3
             Assert.Equal(1L, Scalar(db, "SELECT COUNT(*) FROM sqlite_master WHERE type='index' AND name='idx_projects_name';"));
             Assert.Equal(1L, Scalar(db, "SELECT COUNT(*) FROM pragma_table_info('projects') WHERE name='description';"));   // v4
@@ -105,7 +107,7 @@ public class SchemaMigrationTests
 
             db.EnsureSchema();
 
-            Assert.Equal(5L, Scalar(db, "PRAGMA user_version;"));
+            Assert.Equal(6L, Scalar(db, "PRAGMA user_version;"));
             Assert.Equal(2L, Scalar(db, "SELECT COUNT(*) FROM projects;"));                           // both kept
             Assert.Equal(2L, Scalar(db, "SELECT COUNT(DISTINCT name) FROM projects;"));               // names now distinct
             Assert.Equal(1L, Scalar(db, "SELECT COUNT(*) FROM projects WHERE name='調査';"));          // earliest keeps it
@@ -158,7 +160,7 @@ public class SchemaMigrationTests
 
             db.EnsureSchema();
 
-            Assert.Equal(5L, Scalar(db, "PRAGMA user_version;"));
+            Assert.Equal(6L, Scalar(db, "PRAGMA user_version;"));
             Assert.Equal(0L, Scalar(db, "SELECT COUNT(*) FROM projects;"));                  // reset
             Assert.Equal(0L, Scalar(db, "SELECT COUNT(*) FROM sqlite_master WHERE name='months';")); // dropped
             Assert.Equal(1L, Scalar(db, "SELECT COUNT(*) FROM pragma_table_info('answers') WHERE name='field_id';"));

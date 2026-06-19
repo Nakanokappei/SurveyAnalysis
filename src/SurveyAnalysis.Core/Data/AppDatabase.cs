@@ -78,7 +78,7 @@ public sealed class AppDatabase
 
     // The raw schema version this build expects. Bump it and add a matching case to MigrationSql when
     // the raw tables change; the runner then carries existing databases forward one step at a time.
-    private const long CurrentRawVersion = 5;
+    private const long CurrentRawVersion = 6;
 
     // Migrates the raw tables to CurrentRawVersion, using PRAGMA user_version (stored in the database
     // header) as the on-disk marker. Each step runs in its own transaction and advances the version,
@@ -118,6 +118,7 @@ public sealed class AppDatabase
         3 => V3UniqueNamesSql,
         4 => V4DescriptionTopicsSql,
         5 => V5AnalysisResultsSql,
+        6 => V6ImageStagingSql,
         _ => throw new InvalidOperationException($"No migration defined for raw schema version {version}."),
     };
 
@@ -245,6 +246,25 @@ public sealed class AppDatabase
         );
 
         CREATE INDEX idx_response_topic_field ON response_topic(field_id);
+        """;
+
+    // v5 → v6: a staging area for image-OCR imports. Each scanned image is read into one staging row
+    // (the image bytes + the OCR'd 項目名→値 as JSON) and held here, NOT in responses, until the user
+    // reviews it against the image and confirms — confirming moves it into responses and deletes the
+    // staging row; discarding just deletes it. Rows cascade away with their project. The bytes are stored
+    // so the review is self-contained (independent of the source file) and survives an app restart.
+    private const string V6ImageStagingSql = """
+        CREATE TABLE image_import_staging (
+            id           INTEGER PRIMARY KEY AUTOINCREMENT,
+            project_id   INTEGER NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+            source_name  TEXT NOT NULL,
+            media_type   TEXT NOT NULL,
+            image_bytes  BLOB NOT NULL,
+            values_json  TEXT NOT NULL,
+            created_utc  TEXT NOT NULL
+        );
+
+        CREATE INDEX idx_staging_project ON image_import_staging(project_id);
         """;
 
     // Analytics star schema, derived from responses/answers by ETL (AnalyticsRepository). One

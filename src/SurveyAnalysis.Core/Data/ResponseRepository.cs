@@ -172,6 +172,30 @@ public sealed class ResponseRepository
         return values;
     }
 
+    // The distinct 選択肢 options recorded for one field, in first-seen order, split out of the stored
+    // multi-select cells (";"-joined). Used as a hint for image OCR so the model picks from the exact
+    // option labels this project already uses, rather than paraphrasing the printed choices.
+    public IReadOnlyList<string> LoadChoiceOptions(long fieldId)
+    {
+        using var connection = _db.Open();
+        using var command = connection.CreateCommand();
+        command.CommandText = """
+            SELECT a.value
+            FROM answers a
+            WHERE a.field_id = $f AND a.value IS NOT NULL AND TRIM(a.value) <> ''
+            ORDER BY a.response_id ASC;
+            """;
+        command.Parameters.AddWithValue("$f", fieldId);
+
+        var options = new List<string>();
+        using var reader = command.ExecuteReader();
+        while (reader.Read())
+            foreach (var option in ChoiceValues.Split(reader.GetString(0)))
+                if (!options.Contains(option))
+                    options.Add(option);
+        return options;
+    }
+
     // Total responses stored for a project (shown as import feedback; the dashboard will use this).
     public int CountForProject(long projectId)
     {

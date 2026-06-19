@@ -70,6 +70,27 @@ public class OcrExtractorTests
         Assert.Empty(values);
     }
 
+    [Fact]
+    public async Task Choice_options_are_listed_inline_for_choice_fields_only()
+    {
+        var llm = new CaptureChat("{}");
+        var fields = new[]
+        {
+            new DataField { Name = "加入サービス", FieldType = FieldType.Choice },
+            new DataField { Name = "ご意見", FieldType = FieldType.FreeText },
+        };
+        var options = new Dictionary<string, IReadOnlyList<string>>
+        {
+            ["加入サービス"] = new[] { "テレビ", "インターネット", "固定電話" },
+        };
+
+        await new OcrExtractor(llm, "gpt-4o").ExtractAsync(new byte[] { 1 }, "image/png", fields, "", options);
+
+        var prompt = llm.LastRequest!.Messages.Single(m => m.Role == "user").Content;
+        Assert.Contains("テレビ / インターネット / 固定電話", prompt);   // options inlined for the choice field
+        Assert.DoesNotContain("ご意見（選択肢", prompt);                 // free-text field gets no option list
+    }
+
     // A chat client that records the last request and replies with a fixed body.
     private sealed class CaptureChat : IChatClient
     {

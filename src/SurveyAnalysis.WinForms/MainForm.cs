@@ -601,13 +601,14 @@ public sealed class MainForm : Form
         form.ShowDialog(this);
     }
 
-    // ===== 画像から取り込む（スキャン画像 → OCR → 回答） =====
+    // ===== 画像から取り込む（フォルダ選択 → OCR → 仮テーブル → 校正 → 回答） =====
 
     private static readonly string[] ScanImageExtensions = { ".jpg", ".jpeg", ".png", ".webp" };
 
-    // 画像から取り込む。設定の読み取りフォルダ直下のスキャン画像を vision OCR で読み、1 枚 = 1 回答として
-    // 取り込み、CSV と同じ感情/トピック解析 → スター再投影 → ダッシュボード表示を行う。読み取り後は設定
-    // (ArchiveAfterScan) に従い「アーカイブ」サブフォルダへ移動して二重読み取りを防ぐ。
+    // 画像から取り込む。毎回フォルダを選ばせ（前回の場所を既定にし、選んだ場所を記憶）、その直下の画像を
+    // vision OCR で読み取って「仮テーブル」(image_import_staging) に貯める。続いて校正画面で画像と読み取り
+    // 値を見比べ、レコードごとに「取り込む」で初めて responses へ確定。確定があれば CSV と同じ感情/トピック
+    // 解析 → スター再投影 → ダッシュボードを行う。確定するまで実データには一切入らない。
     private void OnImportImages(Project project)
     {
         var settings = _shell.CreateSettingsViewModel();
@@ -620,70 +621,87 @@ public sealed class MainForm : Form
             return;
         }
 
-        var scanFolder = settings.ScanFolderPath;
-        if (string.IsNullOrWhiteSpace(scanFolder) || !Directory.Exists(scanFolder))
+        // Pick the folder each time, defaulting to (and remembering) the last-used location.
+        string folder;
+        using (var picker = new FolderBrowserDialog { Description = "読み取る画像のあるフォルダを選択", SelectedPath = settings.ScanFolderPath, UseDescriptionForTitle = true })
         {
-            MessageBox.Show(this, $"読み取りフォルダが見つかりません。\n{scanFolder}\n設定の「全般」で読み取りフォルダを指定してください。",
-                "画像から取り込む", MessageBoxButtons.OK, MessageBoxIcon.Warning);
-            return;
+            if (picker.ShowDialog(this) != DialogResult.OK)
+                return;
+            folder = picker.SelectedPath;
         }
+        settings.ScanFolderPath = folder;
+        settings.Save();   // remember as next time's default
 
-        // Top-level image files only — the アーカイブ subfolder (where read images move to) is a subdir, so
-        // EnumerateFiles (non-recursive) excludes it naturally.
-        var images = EnumerateScanImages(scanFolder);
-        if (images.Count == 0)
+        var images = EnumerateScanImages(folder);
+        if (images.Count == 0 && AppServices.ImageStaging.CountForProject(project.Id) == 0)
         {
-            MessageBox.Show(this, $"読み取りフォルダに画像が見つかりませんでした。\n{scanFolder}",
+            MessageBox.Show(this, $"フォルダに画像が見つかりませんでした。\n{folder}",
                 "画像から取り込む", MessageBoxButtons.OK, MessageBoxIcon.Information);
             return;
         }
 
-        // Each image is a paid vision request — confirm before sending the batch.
-        var confirm = MessageBox.Show(this,
-            $"{images.Count} 件の画像を読み取って「{project.Name}」に取り込みます。よろしいですか？",
-            "画像から取り込む", MessageBoxButtons.OKCancel, MessageBoxIcon.Question);
-        if (confirm != DialogResult.OK)
-            return;
-
-        // OCR each image with a progress dialog, collecting one response per image that yielded any answer
-        // and the source paths that were read (for archiving). The lists are populated on the dialog's
-        // async work and read here after it closes OK.
-        var fields = project.Fields.ToList();
-        var extractor = new OcrExtractor(AppServices.Llm, settings.OcrModel);
-        var responses = new List<SurveyResponse>();
-        var processedPaths = new List<string>();
-
-        using (var dialog = new AnalyzeProgressForm((progress, ct) =>
-            OcrImagesAsync(extractor, fields, project.Description, images, responses, processedPaths, progress, ct), "読み取り"))
+        // OCR any newly picked images into the staging table (each is a paid vision request — confirm the
+        // batch first). Skipped when the pick added no images (e.g. resuming a previous, unreviewed batch).
+        if (images.Count > 0)
         {
-            if (dialog.ShowDialog(this) != DialogResult.OK)
-                return;   // cancelled or errored — nothing persisted, nothing archived
+            var confirm = MessageBox.Show(this,
+                $"{images.Count} 件の画像を読み取ります。読み取り後、校正画面で確認してから取り込みます。よろしいですか？",
+                "画像から取り込む", MessageBoxButtons.OKCancel, MessageBoxIcon.Question);
+            if (confirm != DialogResult.OK)
+                return;
+
+            var fields = project.Fields.ToList();
+            var choiceOptions = LoadChoiceOptions(fields);
+            var extractor = new OcrExtractor(AppServices.Llm, settings.OcrModel);
+            using var dialog = new AnalyzeProgressForm((progress, ct) =>
+                OcrImagesToStagingAsync(extractor, fields, project.Description, choiceOptions, project.Id, images, progress, ct), "読み取り");
+            dialog.ShowDialog(this);   // partial progress is fine — whatever was read is staged for review
         }
 
-        if (responses.Count == 0)
+        // Review every staged record (newly OCR'd plus any left over). Only 取り込む commits to responses.
+        var staged = AppServices.ImageStaging.ListForProject(project.Id);
+        if (staged.Count == 0)
         {
-            MessageBox.Show(this, "画像から取り込める回答が読み取れませんでした。", "画像から取り込む",
+            MessageBox.Show(this, "校正する読み取り結果がありませんでした。", "画像から取り込む",
                 MessageBoxButtons.OK, MessageBoxIcon.Information);
             return;
         }
 
-        // Persist the OCR'd rows, run the same sentiment/topic analysis the CSV paths run, archive the read
-        // images, then re-project the star and open the dashboard.
-        AppServices.Responses.InsertResponses(project.Id, "画像OCR", responses);
-        RunImportAnalysis(project);
-        ArchiveScannedImages(settings, processedPaths);
-        _shell.ShowImportedDashboard(project);
+        using var review = new ImageReviewForm(project, staged, AppServices.Responses, AppServices.ImageStaging);
+        review.ShowDialog(this);
+
+        // If the user confirmed any records, run the same sentiment/topic analysis the CSV paths run, then
+        // re-project the star and open the dashboard.
+        if (review.CommittedCount > 0)
+        {
+            RunImportAnalysis(project);
+            _shell.ShowImportedDashboard(project);
+        }
     }
 
-    // Reads and OCR-extracts each image in turn, reporting n/total. Each image's bytes are read off the UI
-    // thread; ExtractAsync awaits the vision call off-thread. A response is collected only when the image
-    // produced at least one answer, but every successfully-read image is recorded for archiving so the
-    // folder drains. A read/OCR error propagates so the whole batch aborts (nothing is persisted) and the
-    // user can retry — the LLM cache makes the re-run of already-read images free.
-    private static async Task OcrImagesAsync(
+    // The known 選択肢 options per choice field name, gathered from the project's existing answers, used as
+    // an OCR hint so the model picks from the exact labels. A field with no recorded options is omitted.
+    private static IReadOnlyDictionary<string, IReadOnlyList<string>> LoadChoiceOptions(IReadOnlyList<DataField> fields)
+    {
+        var map = new Dictionary<string, IReadOnlyList<string>>();
+        foreach (var field in fields)
+            if (field.FieldType == FieldType.Choice && field.Id > 0)
+            {
+                var options = AppServices.Responses.LoadChoiceOptions(field.Id);
+                if (options.Count > 0)
+                    map[field.Name] = options;
+            }
+        return map;
+    }
+
+    // Reads + OCR-extracts each image in turn (reporting n/total) and stages the result — image bytes plus
+    // the read values — without touching responses. Bytes are read off the UI thread; the vision call
+    // awaits off-thread. A read/OCR error propagates so the dialog reports it; images read before it are
+    // already staged and can be reviewed. The LLM cache makes re-reading the same image free.
+    private static async Task OcrImagesToStagingAsync(
         OcrExtractor extractor, IReadOnlyList<DataField> fields, string description,
-        IReadOnlyList<string> imagePaths, List<SurveyResponse> responses, List<string> processedPaths,
-        IProgress<(int Done, int Total)> progress, CancellationToken ct)
+        IReadOnlyDictionary<string, IReadOnlyList<string>> choiceOptions, long projectId,
+        IReadOnlyList<string> imagePaths, IProgress<(int Done, int Total)> progress, CancellationToken ct)
     {
         var total = imagePaths.Count;
         var done = 0;
@@ -691,22 +709,22 @@ public sealed class MainForm : Form
         {
             ct.ThrowIfCancellationRequested();
             var bytes = await Task.Run(() => File.ReadAllBytes(path), ct).ConfigureAwait(false);
-            var values = await extractor.ExtractAsync(bytes, MediaTypeFor(path), fields, description, ct).ConfigureAwait(false);
-            var response = OcrExtractor.BuildResponse(values, fields);
-            if (response.Answers.Count > 0)
-                responses.Add(response);
-            processedPaths.Add(path);
+            var mediaType = MediaTypeFor(path);
+            var values = await extractor.ExtractAsync(bytes, mediaType, fields, description, choiceOptions, ct).ConfigureAwait(false);
+            AppServices.ImageStaging.Add(projectId, Path.GetFileName(path), mediaType, bytes, values);
             done++;
             progress.Report((done, total));
         }
     }
 
-    // Image files directly under the scan folder, sorted by name for a stable processing order.
+    // Image files directly under the chosen folder, sorted by name for a stable processing order.
     private static List<string> EnumerateScanImages(string folder) =>
-        Directory.EnumerateFiles(folder)
-            .Where(f => ScanImageExtensions.Contains(Path.GetExtension(f).ToLowerInvariant()))
-            .OrderBy(f => f, StringComparer.OrdinalIgnoreCase)
-            .ToList();
+        Directory.Exists(folder)
+            ? Directory.EnumerateFiles(folder)
+                .Where(f => ScanImageExtensions.Contains(Path.GetExtension(f).ToLowerInvariant()))
+                .OrderBy(f => f, StringComparer.OrdinalIgnoreCase)
+                .ToList()
+            : new List<string>();
 
     // The data-URL media type for an image path (defaults to JPEG for .jpg/.jpeg and anything unexpected).
     private static string MediaTypeFor(string path) => Path.GetExtension(path).ToLowerInvariant() switch
@@ -715,38 +733,6 @@ public sealed class MainForm : Form
         ".webp" => "image/webp",
         _ => "image/jpeg",
     };
-
-    // Moves every read image into the scan folder's アーカイブ subfolder (per ArchiveAfterScan), creating it
-    // if needed. Best-effort: the rows are already imported, so a move failure is reported but not fatal.
-    private void ArchiveScannedImages(SettingsViewModel settings, IReadOnlyList<string> paths)
-    {
-        if (!settings.ArchiveAfterScan || paths.Count == 0)
-            return;
-        var archiveDir = Path.Combine(settings.ScanFolderPath, settings.ArchiveSubfolderName);
-        try
-        {
-            Directory.CreateDirectory(archiveDir);
-            foreach (var path in paths)
-                MoveToArchive(path, archiveDir);
-        }
-        catch (Exception ex)
-        {
-            MessageBox.Show(this, "読み取り済み画像のアーカイブ移動に失敗しました。\n" + ex.Message,
-                "画像から取り込む", MessageBoxButtons.OK, MessageBoxIcon.Warning);
-        }
-    }
-
-    // Moves one file into the archive folder, disambiguating the name on collision (name, name (2), …).
-    private static void MoveToArchive(string sourcePath, string archiveDir)
-    {
-        var name = Path.GetFileNameWithoutExtension(sourcePath);
-        var ext = Path.GetExtension(sourcePath);
-        var target = Path.Combine(archiveDir, name + ext);
-        var counter = 2;
-        while (File.Exists(target))
-            target = Path.Combine(archiveDir, $"{name} ({counter++}){ext}");
-        File.Move(sourcePath, target);
-    }
 
     // 設定（モーダル）。開くときに保存値を読み込み、閉じたら書き戻す。
     private void OnSettings()
