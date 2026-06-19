@@ -33,8 +33,9 @@ public partial class MainWindowViewModel : ViewModelBase
     // Raised when the user asks to import CSV; the view opens the modal import dialog.
     public event Action<Project>? ImportRequested;
 
-    // Raised when the user asks to import from scanned images; the view scans the configured folder,
-    // OCRs each image into a response, then runs the same import analysis the CSV paths do.
+    // Raised when the user asks to import from scanned images; the view picks a folder each time
+    // (remembering the last one), OCRs each image into the staging table, then opens the proofreading
+    // screen — only rows confirmed there are committed as responses and run through import analysis.
     public event Action<Project>? ImportImagesRequested;
 
     // Raised when the user asks to edit the open project's schema (データ項目); the view opens the

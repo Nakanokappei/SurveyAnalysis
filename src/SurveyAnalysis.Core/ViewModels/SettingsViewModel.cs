@@ -30,17 +30,9 @@ public partial class SettingsViewModel : ViewModelBase
     [ObservableProperty]
     private string _companyName = DefaultCompanyName;
 
-    // 画像の読み取りフォルダのパス
+    // 画像の読み取りフォルダのパス（画像取り込み時に前回の場所を既定として記憶する）
     [ObservableProperty]
     private string _scanFolderPath = DefaultScanFolderPath;
-
-    // 読み取り後にサブフォルダ「アーカイブ」へ移動して二重読み取りを防ぐ
-    [ObservableProperty]
-    private bool _archiveAfterScan = true;
-
-    // アーカイブ先サブフォルダ名
-    [ObservableProperty]
-    private string _archiveSubfolderName = DefaultArchiveSubfolderName;
 
     // ===== メール (Email) =====
 
@@ -147,13 +139,6 @@ public partial class SettingsViewModel : ViewModelBase
     [ObservableProperty]
     private string _backupRetention = DefaultBackupRetention;
 
-    // 読み取りフォルダを参照（プロトタイプでは未実装）
-    [RelayCommand]
-    private void BrowseFolder()
-    {
-        // Folder picker is not wired in this prototype.
-    }
-
     // デフォルトに戻す（全タブの値を初期値へ）
     [RelayCommand]
     private void ResetToDefaults()
@@ -162,8 +147,6 @@ public partial class SettingsViewModel : ViewModelBase
         // 差出人, 宛先, API キー, and the Gmail / SMTP credentials — are user-supplied, so reset must
         // leave whatever the user entered untouched.
         ScanFolderPath = DefaultScanFolderPath;
-        ArchiveAfterScan = true;
-        ArchiveSubfolderName = DefaultArchiveSubfolderName;
 
         MailServerType = DefaultMailServerType;
         SmtpHost = DefaultSmtpHost;
@@ -193,8 +176,6 @@ public partial class SettingsViewModel : ViewModelBase
 
         CompanyName = Get(values, KeyCompanyName, DefaultCompanyName);
         ScanFolderPath = Get(values, KeyScanFolderPath, DefaultScanFolderPath);
-        ArchiveAfterScan = GetBool(values, KeyArchiveAfterScan, true);
-        ArchiveSubfolderName = Get(values, KeyArchiveSubfolderName, DefaultArchiveSubfolderName);
 
         MailFrom = Get(values, KeyMailFrom, DefaultMailFrom);
         MailTo = Get(values, KeyMailTo, DefaultMailTo);
@@ -234,8 +215,6 @@ public partial class SettingsViewModel : ViewModelBase
         {
             [KeyCompanyName] = CompanyName,
             [KeyScanFolderPath] = ScanFolderPath,
-            [KeyArchiveAfterScan] = Bool(ArchiveAfterScan),
-            [KeyArchiveSubfolderName] = ArchiveSubfolderName,
 
             [KeyMailFrom] = MailFrom,
             [KeyMailTo] = MailTo,
@@ -276,8 +255,6 @@ public partial class SettingsViewModel : ViewModelBase
     // Settings storage keys (one per field).
     private const string KeyCompanyName = "CompanyName";
     private const string KeyScanFolderPath = "ScanFolderPath";
-    private const string KeyArchiveAfterScan = "ArchiveAfterScan";
-    private const string KeyArchiveSubfolderName = "ArchiveSubfolderName";
     private const string KeyMailFrom = "MailFrom";
     private const string KeyMailTo = "MailTo";
     private const string KeyMailServerType = "MailServerType";
@@ -306,7 +283,6 @@ public partial class SettingsViewModel : ViewModelBase
     // 既定はユーザーの書類フォルダ（Windows は「ドキュメント」、Mac は ~/Documents）。
     private static readonly string DefaultScanFolderPath =
         System.Environment.GetFolderPath(System.Environment.SpecialFolder.MyDocuments);
-    private const string DefaultArchiveSubfolderName = "アーカイブ";
     private const string DefaultMailFrom = "";
     private const string DefaultMailTo = "";
     private const string DefaultMailServerType = "Gmail";

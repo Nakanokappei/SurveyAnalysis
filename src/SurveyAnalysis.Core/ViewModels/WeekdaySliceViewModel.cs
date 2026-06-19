@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Collections.ObjectModel;
 using System.Linq;
+using System.Windows.Input;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using SurveyAnalysis.Data;
@@ -12,7 +13,7 @@ namespace SurveyAnalysis.ViewModels;
 // 時間別 → 曜日: a flat analysis table grouping responses by day of week (月→日) within the 集計期間
 // window, with every project field as a column. Clicking a weekday drills to its 個票一覧 (記入日 +
 // 抜粋, PII hidden); the clickable breadcrumb (曜日 ＞ 月曜日) walks back. The star is refreshed on open.
-public partial class WeekdaySliceViewModel : PeriodScopedViewModel
+public partial class WeekdaySliceViewModel : PeriodScopedViewModel, ISliceView
 {
     // dim_date day_of_week order: 0=月 … 6=日. Used to map a clicked row label back to its weekday.
     private static readonly string[] DayLabels =
@@ -53,6 +54,11 @@ public partial class WeekdaySliceViewModel : PeriodScopedViewModel
 
     public bool ShowRows => HasData && !IsResponseView;
     public bool ShowResponses => HasData && IsResponseView;
+
+    // ISliceView mapping (members not already matching the interface by name/type).
+    string ISliceView.Summary => CountSummary;
+    ICommand ISliceView.DrillIntoCommand => DrillIntoCommand;
+    ICommand ISliceView.NavigateCrumbCommand => NavigateCrumbCommand;
 
     public WeekdaySliceViewModel(Project project, AnalyticsRepository analytics)
     {

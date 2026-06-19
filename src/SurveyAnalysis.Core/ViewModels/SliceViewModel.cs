@@ -1,6 +1,7 @@
 using System.Collections.Generic;
 using System.Collections.ObjectModel;
 using System.Linq;
+using System.Windows.Input;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using SurveyAnalysis.Data;
@@ -13,7 +14,7 @@ namespace SurveyAnalysis.ViewModels;
 // group drills into its 個票一覧 (記入日 / トピック / 感情 / 抜粋, PII hidden); a breadcrumb walks back.
 // Region groups by 都道府県 etc. (missing → （未設定）); topic groups by the per-自由記述-column topic and
 // shows that topic's own sentiment. 時間別 is its own drill-down view (TimeSliceViewModel / Weekday…).
-public partial class SliceViewModel : PeriodScopedViewModel
+public partial class SliceViewModel : PeriodScopedViewModel, ISliceView
 {
     private readonly AnalyticsRepository _analytics;
     private readonly long _projectId;
@@ -58,6 +59,11 @@ public partial class SliceViewModel : PeriodScopedViewModel
     // The group table shows except when drilled into a group's 個票, which lists the responses instead.
     public bool ShowRows => HasData && !IsResponseView;
     public bool ShowResponses => HasData && IsResponseView;
+
+    // ISliceView mapping (members not already matching the interface by name/type).
+    string ISliceView.Summary => CountSummary;
+    ICommand ISliceView.DrillIntoCommand => DrillIntoCommand;
+    ICommand ISliceView.NavigateCrumbCommand => NavigateCrumbCommand;
 
     // topicFieldId > 0 makes this a topic report for one 質問 (自由記述 column): its topics are the rows,
     // its per-column sentiment the 感情極性, and the report title is the question name. The トピック別 sidebar

@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Collections.ObjectModel;
 using System.Globalization;
 using System.Linq;
+using System.Windows.Input;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using SurveyAnalysis.Data;
@@ -14,7 +15,7 @@ namespace SurveyAnalysis.ViewModels;
 // 月別 breakdown, a month for 週別, a week for 日別, and a day for the 個票一覧 (記入日 + 抜粋, PII hidden).
 // Every project field is a column, aggregated by its type (種類数 / 合計 / 平均). A breadcrumb plus 戻る
 // walks back up; the 集計期間 dropdown (from the base) narrows the window and resets the drill.
-public partial class TimeSliceViewModel : PeriodScopedViewModel
+public partial class TimeSliceViewModel : PeriodScopedViewModel, ISliceView
 {
     private readonly AnalyticsRepository _analytics;
     private readonly long _projectId;
@@ -70,6 +71,12 @@ public partial class TimeSliceViewModel : PeriodScopedViewModel
     // individual responses instead.
     public bool ShowChildren => HasData && !IsTerminal;
     public bool ShowResponses => HasData && IsTerminal;
+
+    // ISliceView mapping: 時間別 names its summary/table-visibility differently (drill levels, not groups).
+    string ISliceView.Summary => ScopeSummary;
+    bool ISliceView.ShowRows => ShowChildren;
+    ICommand ISliceView.DrillIntoCommand => DrillIntoCommand;
+    ICommand ISliceView.NavigateCrumbCommand => NavigateCrumbCommand;
 
     public TimeSliceViewModel(Project project, AnalyticsRepository analytics)
     {

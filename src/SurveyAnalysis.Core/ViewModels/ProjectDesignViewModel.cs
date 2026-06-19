@@ -12,9 +12,8 @@ using SurveyAnalysis.Models;
 namespace SurveyAnalysis.ViewModels;
 
 // The project creation dialog. The survey field definitions (項目名・データ型・分析方法・
-// アラート閾値) are stacked vertically and editable; the column design can be test-run
-// against an already-loaded scan image. No OCR runs here — RunTest shows placeholder output.
-// Completion is signalled via events so the hosting window can close with the result.
+// アラート閾値) are stacked vertically and editable. Completion is signalled via events so the
+// hosting window can close with the result.
 public partial class ProjectDesignViewModel : ViewModelBase
 {
     // Raised with the new project when the user confirms; the host closes the dialog with it.
@@ -41,20 +40,6 @@ public partial class ProjectDesignViewModel : ViewModelBase
 
     // 設計中のデータ項目（縦に並ぶ）
     public ObservableCollection<DataField> Fields { get; } = new();
-
-    // テスト用にその場で指定した画像（新規プロジェクトには読み込み済み回答がまだ無いため、
-    // 一覧から選ぶのではなく単発でファイルを指定する）。プロトタイプでは選択ダイアログは未実装。
-    [ObservableProperty]
-    [NotifyPropertyChangedFor(nameof(HasTestImage))]
-    private string _testImagePath = "";
-
-    public bool HasTestImage => !string.IsNullOrEmpty(TestImagePath);
-
-    // テスト実行結果（各項目に何が抽出されるかのプレビュー）
-    public ObservableCollection<TestResultRow> TestResults { get; } = new();
-
-    [ObservableProperty]
-    private bool _hasTestResult;
 
     // Non-null when editing an existing project's schema rather than creating a new one. Drives
     // the dialog title and the confirm button label, and tells CreateProject to update in place.
@@ -151,38 +136,6 @@ public partial class ProjectDesignViewModel : ViewModelBase
     [RelayCommand]
     private void RemoveField(DataField field) => Fields.Remove(field);
 
-    // テスト用の画像をその場で指定（プロトタイプではファイル選択ダイアログは未実装）
-    [RelayCommand]
-    private void PickTestImage()
-    {
-        TestImagePath = @"C:\Temp\sample_scan.jpg";
-        TestResults.Clear();
-        HasTestResult = false;
-    }
-
-    // 読み込み済み画像でテスト（ダミー抽出結果を表示）
-    [RelayCommand]
-    private void RunTest()
-    {
-        TestResults.Clear();
-        foreach (var field in Fields)
-        {
-            // Personal information is never shown to the user (spec §8); show a masked marker.
-            var value = field.IsPersonalInformation
-                ? "（暗号化・非表示）"
-                : SampleExtraction(field);
-            TestResults.Add(new TestResultRow
-            {
-                FieldName = string.IsNullOrWhiteSpace(field.Name) ? "（未命名）" : field.Name,
-                FieldTypeLabel = FieldTypeInfo.Label(field.FieldType),
-                AnalysisLabel = FieldTypeInfo.Label(field.Analysis),
-                AnalysisResult = SampleAnalysisResult(field.Analysis),
-                ExtractedValue = value
-            });
-        }
-        HasTestResult = true;
-    }
-
     // 確定（新規作成または変更保存）。必須欄が埋まっているときだけ実行可能。編集時は既存IDを引き継いだ
     // 下書きを返し、ホストが保存して開き直す。
     [RelayCommand(CanExecute = nameof(CanCreate))]
@@ -209,25 +162,6 @@ public partial class ProjectDesignViewModel : ViewModelBase
     [RelayCommand]
     private void DeleteProject() => DeleteRequested?.Invoke();
 
-    // Produces a placeholder analysis result per analysis method (none / topic / sentiment).
-    private static string SampleAnalysisResult(AnalysisMethod method) => method switch
-    {
-        AnalysisMethod.Topic => "配線・接続",
-        AnalysisMethod.Sentiment => "ポジティブ (+0.6)",
-        _ => "—"
-    };
-
-    // Produces a placeholder extracted value per non-PII field type.
-    private static string SampleExtraction(DataField field) => field.FieldType switch
-    {
-        FieldType.Date => "2026/05/28",
-        FieldType.Choice => "とても満足",
-        FieldType.Number => "4",
-        FieldType.Text => "丁寧でした",
-        FieldType.FreeText => "担当の方が丁寧に説明してくれて安心できました。",
-        _ => "（サンプル値）"
-    };
-
     // Clones a field so the edit dialog works on a detached copy. UseForAggregation is assigned
     // before UseLoadDateAsDefault so the aggregation→load-date rule does not overwrite the copy.
     private static DataField CloneField(DataField source) => new()
@@ -241,14 +175,4 @@ public partial class ProjectDesignViewModel : ViewModelBase
         UseForAggregation = source.UseForAggregation,
         UseLoadDateAsDefault = source.UseLoadDateAsDefault,
     };
-
-    // One row of the test preview table.
-    public class TestResultRow
-    {
-        public required string FieldName { get; init; }
-        public required string FieldTypeLabel { get; init; }
-        public required string AnalysisLabel { get; init; }
-        public required string AnalysisResult { get; init; }
-        public required string ExtractedValue { get; init; }
-    }
 }
