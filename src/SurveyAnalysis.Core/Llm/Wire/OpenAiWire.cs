@@ -48,16 +48,20 @@ internal sealed class ChatRequestWire
 }
 
 // The assistant's reply message: content is always a plain string (text), so it stays typed as string
-// rather than the request side's polymorphic object.
+// rather than the request side's polymorphic object. refusal carries the model's reason when it declines
+// (content is then null) — surfaced in the error so an empty reply is explainable rather than opaque.
 internal sealed class ChatResponseMessageWire
 {
     [JsonPropertyName("role")] public string Role { get; set; } = "";
     [JsonPropertyName("content")] public string? Content { get; set; }
+    [JsonPropertyName("refusal")] public string? Refusal { get; set; }
 }
 
 internal sealed class ChatChoiceWire
 {
     [JsonPropertyName("message")] public ChatResponseMessageWire? Message { get; set; }
+    // Why generation stopped (stop / length / content_filter); reported when the content is empty.
+    [JsonPropertyName("finish_reason")] public string? FinishReason { get; set; }
 }
 
 internal sealed class ChatUsageWire

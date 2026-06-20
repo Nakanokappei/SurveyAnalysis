@@ -75,9 +75,17 @@ public sealed class OpenAiCompatibleClient : ILlmClient
         var body = await SendAsync(_chat, _chatGate, () => Post(_chat, "/chat/completions", json), ct).ConfigureAwait(false);
         var response = Deserialize(body, OpenAiJsonContext.Default.ChatResponseWire, "chat");
 
-        var content = response.Choices is { Count: > 0 } ? response.Choices[0].Message?.Content : null;
+        var choice = response.Choices is { Count: > 0 } ? response.Choices[0] : null;
+        var content = choice?.Message?.Content;
         if (content is null)
-            throw new LlmException($"Chat response from {_chat.Label} had no message content.");
+        {
+            // Explain the empty reply instead of a bare "no content": a model refusal (its own text) or a
+            // non-stop finish reason (length / content_filter) is almost always the real cause.
+            var reason = choice?.Message?.Refusal is { Length: > 0 } refusal ? $"モデルが応答を拒否しました: {refusal}"
+                : choice?.FinishReason is { Length: > 0 } finish ? $"finish_reason={finish}"
+                : "応答に内容がありませんでした";
+            throw new LlmException($"Chat response from {_chat.Label} had no message content（{reason}）.");
+        }
 
         var result = new ChatResult(content, response.Model ?? request.Model,
             response.Usage?.PromptTokens, response.Usage?.CompletionTokens, FromCache: false);

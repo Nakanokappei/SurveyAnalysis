@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Linq;
 using System.Text;
 using System.Text.Json;
 using System.Threading;
@@ -35,7 +36,11 @@ public sealed class OcrExtractor
         IReadOnlyDictionary<string, IReadOnlyList<string>>? choiceOptions = null,
         CancellationToken ct = default)
     {
-        if (fields.Count == 0 || imageBytes.Length == 0)
+        // Personal-information fields (氏名 / 住所 / 電話番号 …) are never sent to OCR: vision models refuse
+        // to transcribe a real person's contact details, and this app keeps PII out of analysis anyway. The
+        // user can still type them in the proofreading screen. Only non-PII fields are read by the model.
+        var ocrFields = fields.Where(f => !FieldTypeInfo.IsPersonalInformation(f.FieldType)).ToList();
+        if (ocrFields.Count == 0 || imageBytes.Length == 0)
             return new Dictionary<string, string>();
 
         var dataUrl = $"data:{mediaType};base64,{Convert.ToBase64String(imageBytes)}";
@@ -44,13 +49,13 @@ public sealed class OcrExtractor
             new[]
             {
                 new ChatMessage("system", SystemPrompt),
-                new ChatMessage("user", BuildUserPrompt(fields, projectDescription, choiceOptions), new[] { dataUrl }),
+                new ChatMessage("user", BuildUserPrompt(ocrFields, projectDescription, choiceOptions), new[] { dataUrl }),
             },
             Temperature: 0,
             ResponseFormat: "json_object");
 
         var result = await _chat.CompleteAsync(request, ct).ConfigureAwait(false);
-        return Parse(result.Content, fields);
+        return Parse(result.Content, ocrFields);
     }
 
     // Turns an extracted 項目名→値 map into one response: an answer per field that has a non-empty value,
@@ -65,9 +70,15 @@ public sealed class OcrExtractor
         return new SurveyResponse { Answers = answers };
     }
 
+    // The first two sentences establish legitimate context: vision models otherwise sometimes refuse to
+    // transcribe a form that contains a person's name / address / phone, reading it as private data. This
+    // is first-party survey digitisation by the data owner (the respondent consented), so transcription is
+    // a routine clerical task — saying so plainly prevents the spurious "I can't assist with that" refusal.
     private const string SystemPrompt =
-        "あなたはスキャンされたアンケート帳票を読み取るアシスタントです。" +
-        "画像から各項目の値を読み取り、指定された項目名をキーにしたJSONで返してください。" +
+        "あなたは、企業が自社で実施した紙のアンケート用紙を集計するための、OCR・データ入力アシスタントです。" +
+        "対象は回答者の同意のもとに収集された自社アンケートで、その記入内容を社内システムへ転記する正当な事務作業です。" +
+        "なお、氏名・住所・電話番号などの個人情報は読み取り対象に含めません（指定された項目だけを読み取ってください）。" +
+        "画像に記入された各項目の値を、忠実にそのまま文字起こしし、指定された項目名をキーにしたJSONで返してください。" +
         "値は文字列。日付は YYYY/MM/DD 形式。" +
         "選択肢の項目は、提示された選択肢の中から、チェック・丸などで選ばれているものだけを選んでください。" +
         "複数該当する場合は「; 」で区切る。" +

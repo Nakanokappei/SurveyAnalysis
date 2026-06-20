@@ -34,13 +34,17 @@ public class OcrExtractorTests
 
         // String, numeric (kept as text) and free-text fields are read; an unknown key is ignored.
         Assert.Equal("2026/05/20", values["記入日"]);
-        Assert.Equal("山田太郎", values["氏名"]);
         Assert.Equal("4", values["満足度"]);
         Assert.Equal("対応が丁寧でした", values["ご意見"]);
         Assert.False(values.ContainsKey("不明な列"));
 
-        // The user message carried exactly one base64 data URL for the image bytes.
+        // The personal-information field (氏名 = Name) is never sent to OCR, so even though the (fake) model
+        // returned a value for it, it is excluded from the result and from the prompt the model received.
+        Assert.False(values.ContainsKey("氏名"));
         var userMessage = llm.LastRequest!.Messages.Single(m => m.Role == "user");
+        Assert.DoesNotContain("氏名", userMessage.Content);
+
+        // The user message carried exactly one base64 data URL for the image bytes.
         Assert.NotNull(userMessage.ImageDataUrls);
         var dataUrl = Assert.Single(userMessage.ImageDataUrls!);
         Assert.Equal("data:image/png;base64," + System.Convert.ToBase64String(new byte[] { 1, 2, 3 }), dataUrl);
