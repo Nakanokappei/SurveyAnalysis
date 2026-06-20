@@ -18,7 +18,7 @@ public sealed record ResponseAnalysis(
 
 // One point of the 感情極性の推移 line: a month (year+month for ordering/labels), the average row
 // sentiment over that month's analysed responses within the scope, and how many fed the average.
-public sealed record SentimentTrendPoint(int Year, int Month, string Label, double Average, int Count);
+public sealed record SentimentTrendPoint(string AxisLabel, string Label, double Average, int Count);
 
 // Builds and queries the analytics star schema. Rebuild performs the ETL: it reads a project's raw
 // responses/answers, resolves each response's date / region / topic dimension members, and writes
@@ -300,33 +300,69 @@ public sealed class AnalyticsRepository
             .ToList();
     }
 
-    // The average row sentiment per month within the 集計期間 window (chronological), over responses that
-    // carry a sentiment score. Drives the 感情極性の推移 line at the top of every 切り口. Months with no
-    // analysed response are omitted, so the line connects only the months that have data. Dateless facts
-    // (no date_key) are excluded by the dim_date join, as they cannot sit on a time axis.
+    // The average row sentiment over the 集計期間 window (chronological), bucketed by day when the dated
+    // scored data spans ≤ 30 days and by ISO week otherwise — a short period reads day-by-day, a long one
+    // stays legible. Buckets with no analysed response are omitted, so the line connects only buckets with
+    // data. Dateless facts (no date_key) are excluded by the dim_date join. Drives the 感情極性の推移 line.
     public IReadOnlyList<SentimentTrendPoint> SentimentTrend(long projectId, long? fromKey, long? toKey)
     {
         using var connection = _db.Open();
+
+        // The span of the dated, scored facts in the window picks the bucket: ≤ 30 days → daily, else weekly.
+        long minKey, maxKey;
+        using (var spanCommand = connection.CreateCommand())
+        {
+            spanCommand.Parameters.AddWithValue("$pid", projectId);
+            var spanWhere = ScopeWhere(TimeScope.Root, fromKey, toKey, spanCommand);
+            spanCommand.CommandText =
+                "SELECT MIN(f.date_key), MAX(f.date_key) FROM fact_response f "
+                + $"JOIN dim_date d ON f.date_key = d.date_key WHERE {spanWhere} AND f.sentiment_score IS NOT NULL";
+            using var spanReader = spanCommand.ExecuteReader();
+            if (!spanReader.Read() || spanReader.IsDBNull(0))
+                return Array.Empty<SentimentTrendPoint>();
+            minKey = spanReader.GetInt64(0);
+            maxKey = spanReader.GetInt64(1);
+        }
+        var daily = (KeyToDate(maxKey) - KeyToDate(minKey)).Days <= 30;
+
         using var command = connection.CreateCommand();
         command.Parameters.AddWithValue("$pid", projectId);
         var where = ScopeWhere(TimeScope.Root, fromKey, toKey, command);
-        command.CommandText = $"""
-            SELECT d.year AS yr, d.month AS mo, d.month_label AS molabel,
-                   AVG(f.sentiment_score) AS avg, COUNT(f.sentiment_score) AS n
-            FROM fact_response f
-            JOIN dim_date d ON f.date_key = d.date_key
-            WHERE {where} AND f.sentiment_score IS NOT NULL
-            GROUP BY d.year, d.month
-            ORDER BY d.year, d.month;
-            """;
+        // Daily: one row per date. Weekly: one row per ISO week, keyed by its earliest dated day and
+        // labelled with the week (2026年 第21週). Both carry a representative date_key for the short axis label.
+        command.CommandText = daily
+            ? $"""
+                SELECT d.date_key AS k, '' AS lbl, AVG(f.sentiment_score) AS avg, COUNT(f.sentiment_score) AS n
+                FROM fact_response f
+                JOIN dim_date d ON f.date_key = d.date_key
+                WHERE {where} AND f.sentiment_score IS NOT NULL
+                GROUP BY d.date_key
+                ORDER BY d.date_key;
+                """
+            : $"""
+                SELECT MIN(d.date_key) AS k, d.week_label AS lbl, AVG(f.sentiment_score) AS avg, COUNT(f.sentiment_score) AS n
+                FROM fact_response f
+                JOIN dim_date d ON f.date_key = d.date_key
+                WHERE {where} AND f.sentiment_score IS NOT NULL
+                GROUP BY d.week_year, d.week_of_year
+                ORDER BY d.week_year, d.week_of_year;
+                """;
 
         var points = new List<SentimentTrendPoint>();
         using var reader = command.ExecuteReader();
         while (reader.Read())
-            points.Add(new SentimentTrendPoint(
-                reader.GetInt32(0), reader.GetInt32(1), reader.GetString(2), reader.GetDouble(3), reader.GetInt32(4)));
+        {
+            var date = KeyToDate(reader.GetInt64(0));
+            var axisLabel = $"{date.Month}/{date.Day}";
+            var label = daily ? date.ToString("yyyy/MM/dd") : reader.GetString(1);
+            points.Add(new SentimentTrendPoint(axisLabel, label, reader.GetDouble(2), reader.GetInt32(3)));
+        }
         return points;
     }
+
+    // A yyyymmdd date_key as a DateTime — for span maths and the short axis label.
+    private static DateTime KeyToDate(long key) =>
+        new((int)(key / 10000), (int)(key / 100 % 100), (int)(key % 100));
 
     // The individual responses on a given weekday within the window (the 曜日 view's terminal 個票一覧).
     // Weekday is not part of the drill scope, so it has its own predicate rather than going via TimeScope.

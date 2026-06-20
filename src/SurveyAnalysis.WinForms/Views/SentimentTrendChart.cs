@@ -8,10 +8,10 @@ using SurveyAnalysis.Data;
 
 namespace SurveyAnalysis.WinForms;
 
-// A small line chart of 感情極性の推移 — the average row sentiment per month over the selected 集計期間.
-// Y is fixed to [-1, +1] with a zero baseline; X is the months in order. Markers are tinted by sign
-// (green ≥0 / red <0) and a tooltip shows the month's average and 件数 on hover. Pure GDI+; the host
-// feeds it points via SetData and toggles its visibility.
+// A small line chart of 感情極性の推移 — the average row sentiment over the selected 集計期間, bucketed by
+// day or week (the repository chooses by span). Y is fixed to [-1, +1] with a zero baseline; X is the
+// buckets in order, each carrying its own short axis label. Markers are tinted by sign (green ≥0 / red <0)
+// and a tooltip shows the bucket's average and 件数 on hover. Pure GDI+; the host feeds points via SetData.
 internal sealed class SentimentTrendChart : Control
 {
     private IReadOnlyList<SentimentTrendPoint> _points = Array.Empty<SentimentTrendPoint>();
@@ -107,7 +107,7 @@ internal sealed class SentimentTrendChart : Control
 
             if (i % labelStep == 0 || i == _points.Count - 1)
             {
-                var text = $"{point.Year % 100:00}/{point.Month}";
+                var text = point.AxisLabel;
                 var size = g.MeasureString(text, monthFont);
                 g.DrawString(text, monthFont, labelBrush, center.X - size.Width / 2, plot.Bottom + Dp(3));
             }

@@ -39,7 +39,7 @@ internal static class SliceTableView
         chart = view;
         var title = new Label
         {
-            Text = "感情極性の推移（月別平均）", Dock = DockStyle.Top, AutoSize = true,
+            Text = "感情極性の推移", Dock = DockStyle.Top, AutoSize = true,
             ForeColor = Theme.TitleText, Font = Theme.Font(11f, FontStyle.Bold), Padding = new Padding(0, 0, 0, 6),
         };
         card.Controls.Add(view);    // Fill (added first, behind)
