@@ -36,26 +36,53 @@ public sealed class OcrExtractor
         IReadOnlyDictionary<string, IReadOnlyList<string>>? choiceOptions = null,
         CancellationToken ct = default)
     {
-        // Personal-information fields (氏名 / 住所 / 電話番号 …) are never sent to OCR: vision models refuse
-        // to transcribe a real person's contact details, and this app keeps PII out of analysis anyway. The
-        // user can still type them in the proofreading screen. Only non-PII fields are read by the model.
-        var ocrFields = fields.Where(f => !FieldTypeInfo.IsPersonalInformation(f.FieldType)).ToList();
-        if (ocrFields.Count == 0 || imageBytes.Length == 0)
+        if (fields.Count == 0 || imageBytes.Length == 0)
             return new Dictionary<string, string>();
 
         var dataUrl = $"data:{mediaType};base64,{Convert.ToBase64String(imageBytes)}";
+
+        // Read as much as possible. Try every field first, so a model that will transcribe the form reads
+        // the personal-information fields (氏名 / 住所 / 電話番号) too — they show in the proofreading screen
+        // for the user to verify against the image like any other value. If the model refuses the request
+        // (vision models often decline a form bearing a real name / address / phone), fall back to the
+        // non-PII fields so the rest is still read; the refused PII is left empty and the proofreading
+        // screen flags it for manual entry from the image. Nothing is stored without that human check.
+        try
+        {
+            return await ReadFieldsAsync(dataUrl, fields, projectDescription, choiceOptions, ct).ConfigureAwait(false);
+        }
+        catch (LlmEmptyResponseException)
+        {
+            var nonPii = fields.Where(f => !FieldTypeInfo.IsPersonalInformation(f.FieldType)).ToList();
+            // No PII to drop (so the refusal was about something else), or every field is PII: nothing more
+            // to try — return what we have (empty) and let the user fill the fields in manually.
+            if (nonPii.Count == 0 || nonPii.Count == fields.Count)
+                return new Dictionary<string, string>();
+            return await ReadFieldsAsync(dataUrl, nonPii, projectDescription, choiceOptions, ct).ConfigureAwait(false);
+        }
+    }
+
+    // One OCR pass over the given fields: a vision chat call (the image attached) forced to JSON, parsed
+    // into a 項目名→値 map. Throws LlmEmptyResponseException when the model returns no content (a refusal).
+    private async Task<IReadOnlyDictionary<string, string>> ReadFieldsAsync(
+        string dataUrl,
+        IReadOnlyList<DataField> fields,
+        string projectDescription,
+        IReadOnlyDictionary<string, IReadOnlyList<string>>? choiceOptions,
+        CancellationToken ct)
+    {
         var request = new ChatRequest(
             _model,
             new[]
             {
                 new ChatMessage("system", SystemPrompt),
-                new ChatMessage("user", BuildUserPrompt(ocrFields, projectDescription, choiceOptions), new[] { dataUrl }),
+                new ChatMessage("user", BuildUserPrompt(fields, projectDescription, choiceOptions), new[] { dataUrl }),
             },
             Temperature: 0,
             ResponseFormat: "json_object");
 
         var result = await _chat.CompleteAsync(request, ct).ConfigureAwait(false);
-        return Parse(result.Content, ocrFields);
+        return Parse(result.Content, fields);
     }
 
     // Turns an extracted 項目名→値 map into one response: an answer per field that has a non-empty value,
@@ -70,15 +97,14 @@ public sealed class OcrExtractor
         return new SurveyResponse { Answers = answers };
     }
 
-    // The first two sentences establish legitimate context: vision models otherwise sometimes refuse to
-    // transcribe a form that contains a person's name / address / phone, reading it as private data. This
-    // is first-party survey digitisation by the data owner (the respondent consented), so transcription is
-    // a routine clerical task — saying so plainly prevents the spurious "I can't assist with that" refusal.
+    // Framed as verbatim transcription of the data owner's own consented survey form (a clerical OCR task),
+    // not "extraction of someone's personal data" — this wording is what lets a vision model transcribe a
+    // form bearing a name / address / phone instead of refusing with "I can't assist with that". If a model
+    // still refuses, ExtractAsync retries without the PII fields (the user enters those by hand).
     private const string SystemPrompt =
-        "あなたは、企業が自社で実施した紙のアンケート用紙を集計するための、OCR・データ入力アシスタントです。" +
-        "対象は回答者の同意のもとに収集された自社アンケートで、その記入内容を社内システムへ転記する正当な事務作業です。" +
-        "なお、氏名・住所・電話番号などの個人情報は読み取り対象に含めません（指定された項目だけを読み取ってください）。" +
-        "画像に記入された各項目の値を、忠実にそのまま文字起こしし、指定された項目名をキーにしたJSONで返してください。" +
+        "あなたは、企業が自社で実施した紙のアンケート用紙をデジタル化する、OCR・転記アシスタントです。" +
+        "対象は回答者の同意のもとに収集された自社アンケートで、その記入内容をそのまま社内システムへ書き写す正当な事務作業です。" +
+        "画像の各項目欄に記入・印字された値を、書かれているとおり忠実に文字起こしし、指定された項目名をキーにしたJSONで返してください。" +
         "値は文字列。日付は YYYY/MM/DD 形式。" +
         "選択肢の項目は、提示された選択肢の中から、チェック・丸などで選ばれているものだけを選んでください。" +
         "複数該当する場合は「; 」で区切る。" +

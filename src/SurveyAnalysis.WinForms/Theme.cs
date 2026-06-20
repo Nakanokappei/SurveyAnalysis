@@ -27,6 +27,7 @@ internal static class Theme
     public static readonly Color Faint = ColorTranslator.FromHtml("#94A3B8");
     public static readonly Color Danger = ColorTranslator.FromHtml("#DC2626");
     public static readonly Color Success = ColorTranslator.FromHtml("#16A34A");
+    public static readonly Color Warning = ColorTranslator.FromHtml("#B45309");
     public static readonly Color BarTrackText = ColorTranslator.FromHtml("#334155");
 
     // Accent (primary action) — Windows-standard blue.

@@ -211,12 +211,14 @@ internal sealed class ImageReviewForm : Form
         foreach (var field in _fields.AsEnumerable().Reverse())
         {
             var multiline = field.FieldType == FieldType.FreeText;
+            var isPii = FieldTypeInfo.IsPersonalInformation(field.FieldType);
+            var value = item.Values.TryGetValue(field.Name, out var v) ? v : "";
             var row = new Panel { Dock = DockStyle.Top, AutoSize = true, AutoSizeMode = AutoSizeMode.GrowAndShrink, Padding = new Padding(0, 0, 0, LogicalToDeviceUnits(10)), BackColor = Color.White };
 
             var box = new TextBox
             {
                 Dock = DockStyle.Top,
-                Text = item.Values.TryGetValue(field.Name, out var v) ? v : "",
+                Text = value,
                 Font = Theme.Font(10f),
                 Multiline = multiline,
                 ScrollBars = multiline ? ScrollBars.Vertical : ScrollBars.None,
@@ -227,7 +229,7 @@ internal sealed class ImageReviewForm : Form
 
             var caption = new Label
             {
-                Text = field.Name + (FieldTypeInfo.IsPersonalInformation(field.FieldType) ? "　🔒" : ""),
+                Text = field.Name + (isPii ? "　🔒" : ""),
                 Dock = DockStyle.Top,
                 AutoSize = true,
                 ForeColor = Theme.BarTrackText,
@@ -236,6 +238,15 @@ internal sealed class ImageReviewForm : Form
             };
 
             row.Controls.Add(box);       // Top (lower)
+            // A PII field the OCR left empty was declined by the model (it won't transcribe a name / address
+            // / phone); flag it so the user knowingly reads it off the image rather than mistaking the blank
+            // for "nothing written". Nothing is stored without that human check.
+            if (isPii && string.IsNullOrEmpty(value))
+                row.Controls.Add(new Label
+                {
+                    Text = "⚠ OCR対象外です。左の画像を見て入力してください。",
+                    Dock = DockStyle.Top, AutoSize = true, ForeColor = Theme.Warning, Font = Theme.Font(8.5f), Padding = new Padding(0, 0, 0, 3),
+                });
             row.Controls.Add(caption);   // Top (upper)
             _fieldsHost.Controls.Add(row);
             row.Dock = DockStyle.Top;

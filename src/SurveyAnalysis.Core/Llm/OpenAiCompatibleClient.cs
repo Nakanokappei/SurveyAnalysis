@@ -80,11 +80,12 @@ public sealed class OpenAiCompatibleClient : ILlmClient
         if (content is null)
         {
             // Explain the empty reply instead of a bare "no content": a model refusal (its own text) or a
-            // non-stop finish reason (length / content_filter) is almost always the real cause.
+            // non-stop finish reason (length / content_filter) is almost always the real cause. A distinct
+            // exception type lets callers fall back (e.g. OCR retries without the refused fields).
             var reason = choice?.Message?.Refusal is { Length: > 0 } refusal ? $"モデルが応答を拒否しました: {refusal}"
                 : choice?.FinishReason is { Length: > 0 } finish ? $"finish_reason={finish}"
                 : "応答に内容がありませんでした";
-            throw new LlmException($"Chat response from {_chat.Label} had no message content（{reason}）.");
+            throw new LlmEmptyResponseException($"Chat response from {_chat.Label} had no message content（{reason}）.", reason);
         }
 
         var result = new ChatResult(content, response.Model ?? request.Model,

@@ -10,6 +10,16 @@ public class LlmException : Exception
     }
 }
 
+// A 200 response whose assistant message carried no content — usually a model refusal (its text in
+// Reason) or a non-stop finish reason (length / content_filter). Distinct from the base so a caller can
+// react (e.g. retry without the fields that triggered a refusal) rather than treat it as a hard error.
+public sealed class LlmEmptyResponseException : LlmException
+{
+    public string Reason { get; }
+
+    public LlmEmptyResponseException(string message, string reason) : base(message) => Reason = reason;
+}
+
 // A non-success HTTP response that the layer gave up on (a non-retryable 4xx, or a 429/5xx that
 // outlived the retry budget). Carries the status, the provider label, and a short body snippet so
 // configuration mistakes (401 bad key, 404 unknown model) surface clearly.
