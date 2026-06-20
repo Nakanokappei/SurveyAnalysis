@@ -19,5 +19,11 @@ project.lock.json
 .DS_Store
 ._*
 
+# ---- Windows ----
+# Explorer thumbnail cache / folder artefacts on the Parallels-shared volume.
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+
 # ---- Claude local settings (machine-local) ----
 .claude/settings.local.json
