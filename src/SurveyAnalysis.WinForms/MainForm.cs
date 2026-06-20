@@ -562,9 +562,11 @@ public sealed class MainForm : Form
         using var form = new ProjectDesignForm(vm);
         if (form.ShowDialog(this) == DialogResult.OK && form.ResultProject is { } project && vm.SourceCsv is { } csv)
         {
-            // Persist first (the analyzer reads the saved responses), run the import analysis with a
-            // progress dialog, then rebuild the star and open the dashboard.
+            // Persist first (the analyzer reads the saved responses), auto-generate each 自由記述 column's
+            // topics from the imported answers, run the import analysis (which now has topics to assign),
+            // then rebuild the star and open the dashboard.
             _shell.PersistImportedProject(project, csv, Path.GetFileName(picker.FileName));
+            GenerateTopicsForNewProject(project);
             RunImportAnalysis(project);
             _shell.ShowImportedDashboard(project);
         }
@@ -581,6 +583,37 @@ public sealed class MainForm : Form
 
         var analyzer = new ImportAnalyzer(AppServices.Llm, AppServices.Responses, AppServices.Topics, AppServices.AnalysisResults, settings.SentimentModel);
         using var dialog = new AnalyzeProgressForm((progress, ct) => analyzer.AnalyzeAsync(project, progress, ct));
+        dialog.ShowDialog(this);
+    }
+
+    // Auto-generates each 自由記述 column's topic dictionary by clustering its imported answers, so the
+    // import analysis has topics to assign (a freshly created project has none). One dictionary per column
+    // with ≥ 2 distinct answers; the 構成 → 「既存データからトピックを再構築」 button can refine them later.
+    // Skipped when no API key (the analysis is skipped too) — same gate as RunImportAnalysis.
+    private void GenerateTopicsForNewProject(Project project)
+    {
+        var settings = _shell.CreateSettingsViewModel();
+        if (string.IsNullOrWhiteSpace(settings.ApiKey))
+            return;
+
+        var fields = project.Fields
+            .Where(f => f.FieldType == FieldType.FreeText && f.Id > 0)
+            .Select(f => (Field: f, Answers: AppServices.Responses.LoadValuesForField(f.Id)))
+            .Where(x => x.Answers.Distinct().Count() >= 2)
+            .ToList();
+        if (fields.Count == 0)
+            return;
+
+        var clusterer = new TopicClusterer(AppServices.Llm, settings.TopicModel);
+        using var dialog = new AnalyzeProgressForm(async (progress, ct) =>
+        {
+            foreach (var (field, answers) in fields)
+            {
+                var built = await clusterer.BuildTopicsAsync(answers, progress, ct);
+                if (built.Count > 0)
+                    AppServices.Topics.ReplaceTopics(field.Id, built.Select(t => (t.Label, (float[]?)t.Centroid)).ToList());
+            }
+        }, "トピック生成");
         dialog.ShowDialog(this);
     }
 
