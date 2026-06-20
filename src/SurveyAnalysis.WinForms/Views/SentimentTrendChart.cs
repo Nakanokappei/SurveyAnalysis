@@ -11,13 +11,17 @@ namespace SurveyAnalysis.WinForms;
 // A small line chart of 感情極性の推移 — the average row sentiment over the selected 集計期間, bucketed by
 // day or week (the repository chooses by span). Y is fixed to [-1, +1] with a zero baseline; X is the
 // buckets in order, each carrying its own short axis label. Markers are tinted by sign (green ≥0 / red <0)
-// and a tooltip shows the bucket's average and 件数 on hover. Pure GDI+; the host feeds points via SetData.
+// and a tooltip shows the bucket's average and 件数 on hover. Clicking a marker raises PointClicked so the
+// host can narrow the 集計期間 to that day / week. Pure GDI+; the host feeds points via SetData.
 internal sealed class SentimentTrendChart : Control
 {
     private IReadOnlyList<SentimentTrendPoint> _points = Array.Empty<SentimentTrendPoint>();
     private readonly ToolTip _tip = new() { ShowAlways = true };
     private int _hoverIndex = -1;
     private readonly List<PointF> _markers = new();   // device positions of each point, for hit-testing
+
+    // Raised when a marker is clicked — the host narrows the 集計期間 to that point's [From, To].
+    public event EventHandler<SentimentTrendPoint>? PointClicked;
 
     public SentimentTrendChart()
     {
@@ -114,30 +118,44 @@ internal sealed class SentimentTrendChart : Control
         }
     }
 
-    // Hover: highlight the nearest marker (within a small radius) and show its value / 件数 as a tooltip.
-    protected override void OnMouseMove(MouseEventArgs e)
+    // The marker within the hit radius of the location, or -1.
+    private int NearestMarker(Point location)
     {
-        base.OnMouseMove(e);
         var nearest = -1;
         var best = Dp(14);
         for (var i = 0; i < _markers.Count; i++)
         {
-            var d = (float)Math.Sqrt(Math.Pow(_markers[i].X - e.X, 2) + Math.Pow(_markers[i].Y - e.Y, 2));
+            var d = (float)Math.Sqrt(Math.Pow(_markers[i].X - location.X, 2) + Math.Pow(_markers[i].Y - location.Y, 2));
             if (d < best) { best = d; nearest = i; }
         }
+        return nearest;
+    }
+
+    // Hover: highlight the nearest marker (within a small radius), show its value / 件数, and hint that it
+    // is clickable with a hand cursor.
+    protected override void OnMouseMove(MouseEventArgs e)
+    {
+        base.OnMouseMove(e);
+        var nearest = NearestMarker(e.Location);
+        Cursor = nearest >= 0 ? Cursors.Hand : Cursors.Default;
         if (nearest == _hoverIndex)
             return;
         _hoverIndex = nearest;
-        if (nearest >= 0)
-        {
-            var p = _points[nearest];
-            _tip.SetToolTip(this, $"{p.Label}：平均 {p.Average:+0.00;-0.00;0.00}（{p.Count}件）");
-        }
-        else
-        {
-            _tip.SetToolTip(this, "");
-        }
+        _tip.SetToolTip(this, nearest >= 0
+            ? $"{_points[nearest].Label}：平均 {_points[nearest].Average:+0.00;-0.00;0.00}（{_points[nearest].Count}件）"
+            : "");
         Invalidate();
+    }
+
+    // Clicking a marker narrows the 集計期間 to that point's day / week (the host re-aggregates the report).
+    protected override void OnMouseClick(MouseEventArgs e)
+    {
+        base.OnMouseClick(e);
+        if (e.Button != MouseButtons.Left)
+            return;
+        var index = NearestMarker(e.Location);
+        if (index >= 0)
+            PointClicked?.Invoke(this, _points[index]);
     }
 
     protected override void OnMouseLeave(EventArgs e)

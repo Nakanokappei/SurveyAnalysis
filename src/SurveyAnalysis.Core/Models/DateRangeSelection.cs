@@ -18,9 +18,9 @@ public sealed class DateRangeSelection
         To = to;
     }
 
-    // The picker button's text: the preset's name, or the custom range as dates.
+    // The picker button's text: the preset's name, or the custom range as dates (a single day shows once).
     public string Label => Preset == DateRangePreset.Custom
-        ? $"{From:yyyy/MM/dd} 〜 {To:yyyy/MM/dd}"
+        ? (From == To ? $"{From:yyyy/MM/dd}" : $"{From:yyyy/MM/dd} 〜 {To:yyyy/MM/dd}")
         : DateRangePresetInfo.Label(Preset);
 
     public void Set(DateRangePreset preset, DateTime from, DateTime to)

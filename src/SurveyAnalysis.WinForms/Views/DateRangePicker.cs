@@ -62,6 +62,6 @@ internal sealed class DateRangePicker
     }
 
     private string Label() => _preset == DateRangePreset.Custom
-        ? $"{_from:yyyy/MM/dd} 〜 {_to:yyyy/MM/dd}"
+        ? (_from == _to ? $"{_from:yyyy/MM/dd}" : $"{_from:yyyy/MM/dd} 〜 {_to:yyyy/MM/dd}")
         : DateRangePresetInfo.Label(_preset);
 }

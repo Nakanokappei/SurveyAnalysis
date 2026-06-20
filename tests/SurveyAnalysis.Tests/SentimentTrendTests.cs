@@ -1,3 +1,4 @@
+using System;
 using System.Linq;
 using SurveyAnalysis.Data;
 using SurveyAnalysis.Models;
@@ -51,6 +52,10 @@ public class SentimentTrendTests
         Assert.Equal("6/5", trend[1].AxisLabel);
         Assert.Equal(-0.2, trend[1].Average, 3);
         Assert.Equal(1, trend[1].Count);
+
+        // Each daily point's range is that single day (clicking it narrows the 集計期間 to the day).
+        Assert.Equal(new DateTime(2026, 5, 21), trend[0].From);
+        Assert.Equal(new DateTime(2026, 5, 21), trend[0].To);
     }
 
     [Fact]
@@ -75,6 +80,10 @@ public class SentimentTrendTests
         Assert.Equal(-0.3, trend[1].Average, 3);  // week of 06/15
         Assert.Equal(1, trend[1].Count);
         Assert.Contains("週", trend[0].Label);     // week label, e.g. "2026年 第19週"
+
+        // The week point's range is the whole ISO week (Mon–Sun): 2026/05/04 (Mon) … 05/10 (Sun).
+        Assert.Equal(new DateTime(2026, 5, 4), trend[0].From);
+        Assert.Equal(new DateTime(2026, 5, 10), trend[0].To);
     }
 
     [Fact]

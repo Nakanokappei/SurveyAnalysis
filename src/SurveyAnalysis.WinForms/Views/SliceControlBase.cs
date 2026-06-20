@@ -154,6 +154,14 @@ internal abstract class SliceControlBase<TVm> : UserControl where TVm : PeriodSc
                 RefreshAll();
             }
         };
+        // Clicking a trend marker narrows the 集計期間 to that day / week; the report (table + trend)
+        // re-aggregates and the period picker reflects the new range.
+        _trendChart.PointClicked += (_, point) =>
+        {
+            _vm.SetRange(DateRangePreset.Custom, point.From, point.To);
+            _rangePicker.SetCurrent(_vm.Preset, _vm.From, _vm.To);
+            RefreshAll();
+        };
         OnWireInteractions();
     }
 

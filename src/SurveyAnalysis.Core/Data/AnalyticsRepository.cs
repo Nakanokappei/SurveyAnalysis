@@ -18,7 +18,9 @@ public sealed record ResponseAnalysis(
 
 // One point of the 感情極性の推移 line: a month (year+month for ordering/labels), the average row
 // sentiment over that month's analysed responses within the scope, and how many fed the average.
-public sealed record SentimentTrendPoint(string AxisLabel, string Label, double Average, int Count);
+// From/To is the bucket's inclusive date range (a single day, or an ISO week Mon–Sun) — clicking the
+// point on the chart narrows the 集計期間 to it.
+public sealed record SentimentTrendPoint(string AxisLabel, string Label, double Average, int Count, DateTime From, DateTime To);
 
 // Builds and queries the analytics star schema. Rebuild performs the ETL: it reads a project's raw
 // responses/answers, resolves each response's date / region / topic dimension members, and writes
@@ -348,11 +350,16 @@ public sealed class AnalyticsRepository
         if (days.Count == 0)
             return Array.Empty<SentimentTrendPoint>();
 
-        // ≤ 30-day span → one point per day.
+        // ≤ 30-day span → one point per day (its [from, to] is that single day).
         if ((KeyToDate(days[^1].Key) - KeyToDate(days[0].Key)).Days <= 30)
-            return days.Select(d => TrendPoint(d.Key, KeyToDate(d.Key).ToString("yyyy/MM/dd"), d.Avg, d.Count)).ToList();
+            return days.Select(d =>
+            {
+                var date = KeyToDate(d.Key);
+                return new SentimentTrendPoint($"{date.Month}/{date.Day}", date.ToString("yyyy/MM/dd"), d.Avg, d.Count, date, date);
+            }).ToList();
 
-        // Otherwise merge the days into ISO weeks (count-weighted average), keyed by each week's first day.
+        // Otherwise merge the days into ISO weeks (count-weighted average); each point's [from, to] is the
+        // whole ISO week (Mon–Sun), so clicking it narrows the 集計期間 to that week.
         return days
             .GroupBy(d => (d.WeekYear, d.WeekOfYear))
             .OrderBy(g => g.Key.WeekYear).ThenBy(g => g.Key.WeekOfYear)
@@ -360,17 +367,14 @@ public sealed class AnalyticsRepository
             {
                 var count = g.Sum(d => d.Count);
                 var avg = count == 0 ? 0 : g.Sum(d => d.Avg * d.Count) / count;
-                return TrendPoint(g.Min(d => d.Key), g.First().WeekLabel, avg, count);
+                var monday = MondayOf(KeyToDate(g.Min(d => d.Key)));
+                return new SentimentTrendPoint($"{monday.Month}/{monday.Day}", g.First().WeekLabel, avg, count, monday, monday.AddDays(6));
             })
             .ToList();
     }
 
-    // A trend point from a representative date_key: the short axis label is that date's M/d.
-    private static SentimentTrendPoint TrendPoint(long key, string label, double average, int count)
-    {
-        var date = KeyToDate(key);
-        return new SentimentTrendPoint($"{date.Month}/{date.Day}", label, average, count);
-    }
+    // The Monday (ISO week start) of the week containing the given date.
+    private static DateTime MondayOf(DateTime date) => date.AddDays(-(((int)date.DayOfWeek + 6) % 7));
 
     // A trend's fact-filter: the time scope, plus a builder that binds its dimension params on a command and
     // returns any extra JOIN(s) and an extra WHERE fragment (already prefixed with " AND ", or empty).
