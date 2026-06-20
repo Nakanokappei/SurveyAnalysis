@@ -64,6 +64,7 @@ public sealed class MainForm : Form
         _shell.CreateProjectFromCsvRequested += OnCreateProjectFromCsv;
         _shell.ImportRequested += OnImport;
         _shell.ImportImagesRequested += OnImportImages;
+        _shell.ImportImagesFromFolderRequested += OnImportImagesFromFolder;
         _shell.EditSchemaRequested += OnEditSchema;
 
         RebuildSidebar();
@@ -281,7 +282,8 @@ public sealed class MainForm : Form
         if (_shell.IsProjectOpen)
         {
             AddRow(bottom, NavButton(Icons.Add, "インポート (CSV)", () => _shell.ImportCommand.Execute(null)));
-            AddRow(bottom, NavButton(Icons.Image, "画像から取り込む", () => _shell.ImportImagesCommand.Execute(null)));
+            AddRow(bottom, NavButton(Icons.Image, "画像を読み込む", () => _shell.ImportImagesCommand.Execute(null)));
+            AddRow(bottom, NavButton(Icons.Folder, "フォルダから画像を読み込む", () => _shell.ImportImagesFromFolderCommand.Execute(null)));
             AddRow(bottom, NavButton(Icons.Export, "エクスポート", OnExportNotImplemented));
             // 閉じる is a project action too, so no divider line above it — but it is set apart from the
             // import/export pair by extra spacing (a wider top margin) so it still reads as distinct.
@@ -625,27 +627,21 @@ public sealed class MainForm : Form
         form.ShowDialog(this);
     }
 
-    // ===== 画像から取り込む（ファイル選択 → OCR → 仮テーブル → 校正 → 回答） =====
+    // ===== 画像の読み込み（ファイル選択 / フォルダ選択 → OCR → 仮テーブル → 校正 → 回答） =====
+    //
+    // 二つの入口（選んだ画像ファイル群 / 選んだフォルダ直下の全画像）が、同じ共通処理 RunImageImport に
+    // 画像パスの一覧を渡す。読み取りは vision OCR で「仮テーブル」(image_import_staging) に貯め、校正画面で
+    // 画像と読み取り値を見比べ、レコードごとに「取り込む」で初めて responses へ確定。確定があれば CSV と
+    // 同じ感情/トピック解析 → スター再投影 → ダッシュボードを行う。確定するまで実データには一切入らない。
 
-    // 画像から取り込む。毎回画像ファイルを選ばせ（前回のフォルダを既定にし、選んだ場所を記憶）、それを
-    // vision OCR で読み取って「仮テーブル」(image_import_staging) に貯める。続いて校正画面で画像と読み取り
-    // 値を見比べ、レコードごとに「取り込む」で初めて responses へ確定。確定があれば CSV と同じ感情/トピック
-    // 解析 → スター再投影 → ダッシュボードを行う。確定するまで実データには一切入らない。
+    private static readonly string[] ScanImageExtensions = { ".jpg", ".jpeg", ".png", ".webp" };
+
+    // 画像を読み込む。画像ファイル（複数可）を直接選ばせる。前回のフォルダを既定にし、選んだ場所を記憶する。
     private void OnImportImages(Project project)
     {
-        var settings = _shell.CreateSettingsViewModel();
-
-        // OCR は vision モデル必須。API キーが無ければ何もできないので案内して戻る。
-        if (string.IsNullOrWhiteSpace(settings.ApiKey))
-        {
-            MessageBox.Show(this, "画像の読み取りには OpenAI の API キーが必要です。設定の「LLM」で設定してください。",
-                "画像から取り込む", MessageBoxButtons.OK, MessageBoxIcon.Information);
+        if (!TryGetImageSettings(out var settings))
             return;
-        }
 
-        // Pick the image files each time — a file picker (not a folder picker) so the scans are visible and
-        // selectable directly; several can be chosen at once. Defaults to (and remembers) the last-used
-        // folder. Cancelling with a previous batch still left staged proceeds straight to review.
         List<string> images;
         using (var picker = new OpenFileDialog
         {
@@ -665,10 +661,56 @@ public sealed class MainForm : Form
 
         // Remember the folder of the picked files as next time's default.
         if (images.Count > 0)
-        {
             settings.ScanFolderPath = Path.GetDirectoryName(images[0]) ?? settings.ScanFolderPath;
-            settings.Save();
+
+        RunImageImport(project, settings, images);
+    }
+
+    // フォルダから画像を読み込む。フォルダを選ばせ、その直下の画像をすべて読み取る。
+    private void OnImportImagesFromFolder(Project project)
+    {
+        if (!TryGetImageSettings(out var settings))
+            return;
+
+        List<string> images;
+        using (var picker = new FolderBrowserDialog { Description = "読み取る画像のあるフォルダを選択", SelectedPath = settings.ScanFolderPath, UseDescriptionForTitle = true })
+        {
+            if (picker.ShowDialog(this) == DialogResult.OK)
+            {
+                settings.ScanFolderPath = picker.SelectedPath;
+                images = EnumerateScanImages(picker.SelectedPath);
+                if (images.Count == 0 && AppServices.ImageStaging.CountForProject(project.Id) == 0)
+                {
+                    MessageBox.Show(this, $"フォルダに画像が見つかりませんでした。\n{picker.SelectedPath}",
+                        "フォルダから画像を読み込む", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                    return;
+                }
+            }
+            else if (AppServices.ImageStaging.CountForProject(project.Id) > 0)
+                images = new List<string>();   // nothing newly picked — resume the staged batch in review
+            else
+                return;
         }
+
+        RunImageImport(project, settings, images);
+    }
+
+    // OCR は vision モデル必須。API キーが無ければ何もできないので案内して false を返す。
+    private bool TryGetImageSettings(out SettingsViewModel settings)
+    {
+        settings = _shell.CreateSettingsViewModel();
+        if (!string.IsNullOrWhiteSpace(settings.ApiKey))
+            return true;
+        MessageBox.Show(this, "画像の読み取りには OpenAI の API キーが必要です。設定の「LLM」で設定してください。",
+            "画像の読み込み", MessageBoxButtons.OK, MessageBoxIcon.Information);
+        return false;
+    }
+
+    // 共通処理：選ばれた画像（ファイル選択でもフォルダ選択でも同じ）を OCR→仮テーブル→校正→解析する。
+    // images が空のときは新規読み取りを行わず、未校正のまま残っている仮バッチをそのまま校正画面に出す。
+    private void RunImageImport(Project project, SettingsViewModel settings, List<string> images)
+    {
+        settings.Save();   // remember the last-used location
 
         // OCR any newly picked images into the staging table (each is a paid vision request — confirm the
         // batch first). Skipped when the pick added no images (e.g. resuming a previous, unreviewed batch).
@@ -676,7 +718,7 @@ public sealed class MainForm : Form
         {
             var confirm = MessageBox.Show(this,
                 $"{images.Count} 件の画像を読み取ります。読み取り後、校正画面で確認してから取り込みます。よろしいですか？",
-                "画像から取り込む", MessageBoxButtons.OKCancel, MessageBoxIcon.Question);
+                "画像の読み込み", MessageBoxButtons.OKCancel, MessageBoxIcon.Question);
             if (confirm != DialogResult.OK)
                 return;
 
@@ -692,7 +734,7 @@ public sealed class MainForm : Form
         var staged = AppServices.ImageStaging.ListForProject(project.Id);
         if (staged.Count == 0)
         {
-            MessageBox.Show(this, "校正する読み取り結果がありませんでした。", "画像から取り込む",
+            MessageBox.Show(this, "校正する読み取り結果がありませんでした。", "画像の読み込み",
                 MessageBoxButtons.OK, MessageBoxIcon.Information);
             return;
         }
@@ -708,6 +750,15 @@ public sealed class MainForm : Form
             _shell.ShowImportedDashboard(project);
         }
     }
+
+    // Image files directly under the chosen folder, sorted by name for a stable processing order.
+    private static List<string> EnumerateScanImages(string folder) =>
+        Directory.Exists(folder)
+            ? Directory.EnumerateFiles(folder)
+                .Where(f => ScanImageExtensions.Contains(Path.GetExtension(f).ToLowerInvariant()))
+                .OrderBy(f => f, StringComparer.OrdinalIgnoreCase)
+                .ToList()
+            : new List<string>();
 
     // The known 選択肢 options per choice field name, gathered from the project's existing answers, used as
     // an OCR hint so the model picks from the exact labels. A field with no recorded options is omitted.

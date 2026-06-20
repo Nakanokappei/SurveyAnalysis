@@ -32,6 +32,7 @@ internal static class Icons
     public static readonly (string Font, string Glyph) Dashboard = (Theme.IconFontName, "📊");
     public static readonly (string Font, string Glyph) Add       = (Theme.IconFontName, "➕");
     public static readonly (string Font, string Glyph) Image     = (Theme.IconFontName, "🖼");
+    public static readonly (string Font, string Glyph) Folder    = (Theme.IconFontName, "📁");
     public static readonly (string Font, string Glyph) Settings  = (Theme.IconFontName, "⚙");
     public static readonly (string Font, string Glyph) Calendar  = (Theme.IconFontName, "📅");
 }
