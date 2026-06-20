@@ -71,18 +71,35 @@ internal sealed class DashboardControl : UserControl
 
     // ===== Layout =====
 
+    // Cap the content width (DIP) so the KPI cards and charts read as a composed column on a large /
+    // maximised window instead of stretching edge-to-edge with their values stranded top-left. Below the
+    // cap the content uses the full width.
+    private const int MaxContentWidth = 1400;
+
     private void BuildLayout()
     {
         // One column; the table row takes the remaining height (its grid scrolls internally), the rest
         // size to their content. Dock=Fill children stretch to the column width — no manual width sync.
-        var root = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 1, BackColor = Theme.ContentBack, Padding = new Padding(24) };
+        var root = new TableLayoutPanel { ColumnCount = 1, BackColor = Theme.ContentBack, Padding = new Padding(24), Anchor = AnchorStyles.Top | AnchorStyles.Left };
         root.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
         AddRow(root, BuildHeader(), SizeType.AutoSize);
         AddRow(root, BuildDrillUp(), SizeType.AutoSize);
         AddRow(root, BuildKpis(), SizeType.AutoSize);
         AddRow(root, BuildCharts(), SizeType.AutoSize);
         AddRow(root, BuildTable(), SizeType.Percent);
-        Controls.Add(root);
+
+        // The host owns the (content-coloured) background; the capped, centred root sits on it and is
+        // re-bounded on every resize — filling the height, capped in width, centred horizontally.
+        var host = new Panel { Dock = DockStyle.Fill, BackColor = Theme.ContentBack };
+        host.Controls.Add(root);
+        void LayoutContent()
+        {
+            var width = Math.Min(LogicalToDeviceUnits(MaxContentWidth), host.ClientSize.Width);
+            root.SetBounds(Math.Max(0, (host.ClientSize.Width - width) / 2), 0, width, host.ClientSize.Height);
+        }
+        host.ClientSizeChanged += (_, _) => LayoutContent();
+        Controls.Add(host);
+        LayoutContent();
     }
 
     // Adds a top-level section row with a gap below it.

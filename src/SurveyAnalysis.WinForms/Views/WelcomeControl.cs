@@ -86,7 +86,6 @@ internal sealed class WelcomeControl : UserControl
         buttons.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, ContentWidth));
         buttons.Controls.Add(PrimaryButton("➕", "プロジェクトを作る", () => _vm.CreateProjectCommand.Execute(null)));
         buttons.Controls.Add(OutlineButton("CSV からプロジェクトを作る", () => _vm.CreateFromCsvCommand.Execute(null)));
-        buttons.Controls.Add(LinkButton("サンプルプロジェクトを開く", () => _vm.OpenSampleCommand.Execute(null)));
         card.Controls.Add(buttons);
 
         root.Controls.Add(card, 0, 0);
@@ -235,16 +234,6 @@ internal sealed class WelcomeControl : UserControl
         button.ForeColor = Theme.Accent;
         button.FlatAppearance.BorderColor = Theme.Accent;
         button.FlatAppearance.BorderSize = 1;
-        return button;
-    }
-
-    private Button LinkButton(string text, Action onClick)
-    {
-        var button = BaseButton("", text, onClick);
-        button.BackColor = Theme.ContentBack;
-        button.ForeColor = Theme.Accent;
-        button.FlatAppearance.BorderSize = 0;
-        button.Font = Theme.Font(9.5f);
         return button;
     }
 

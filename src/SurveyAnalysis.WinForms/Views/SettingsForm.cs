@@ -9,11 +9,12 @@ using SurveyAnalysis.ViewModels;
 
 namespace SurveyAnalysis.WinForms;
 
-// The settings dialog — three tabs (全般 / メール / LLM) over SettingsViewModel, with "デフォルトに戻す"
+// The settings dialog — tabs (全般 / LLM / データベース) over SettingsViewModel, with "デフォルトに戻す"
 // floated top-right. Inputs two-way bind to the view model (INotifyPropertyChanged), so edits flow
 // back and reset refreshes every field. The host calls Save() after the dialog closes. The LLM tab is
 // organised into three groups — 共通 (the shared endpoint / key / concurrency / timeout used by both
 // chat and embeddings), LLM (the per-task chat models), and 埋め込み (embedding model / batch).
+// (メールアラート・月次レポートは 1.0 では未提供のため、対応する設定 UI は出していない。)
 internal sealed class SettingsForm : Form
 {
     private readonly SettingsViewModel _vm;
@@ -75,7 +76,6 @@ internal sealed class SettingsForm : Form
         };
         _tabs.DrawItem += DrawTab;
         _tabs.TabPages.Add(BuildGeneralTab());
-        _tabs.TabPages.Add(BuildMailTab());
         _tabs.TabPages.Add(BuildLlmTab());
         _tabs.TabPages.Add(BuildDatabaseTab());
 
@@ -106,7 +106,7 @@ internal sealed class SettingsForm : Form
     {
         base.OnLoad(e);
 
-        var grid = _tabs.TabPages[2].Controls[0];             // the LLM tab — widest and tallest
+        var grid = _tabs.TabPages[1].Controls[0];             // the LLM tab — widest and tallest
         var pagePadding = _tabs.TabPages[0].Padding;
         var tabStrip = _tabs.DisplayRectangle.Top;            // tab strip + top border
         var contentHeight = grid.PreferredSize.Height + pagePadding.Vertical + tabStrip + _header.PreferredSize.Height + Padding.Vertical;
@@ -147,38 +147,17 @@ internal sealed class SettingsForm : Form
         // The image-read folder is no longer pre-configured here: 「画像から取り込む」 asks for the folder
         // each time (defaulting to the last-used location), so there is nothing to set in advance.
         AddRow(grid, "", new Label { Text = "画像の読み取りフォルダは「画像から取り込む」の実行時に毎回選びます（前回の場所が既定）。", AutoSize = true, ForeColor = Theme.Muted, Font = Theme.Font(8.5f), Margin = new Padding(0, 6, 0, 0) });
+        // App version (this dialog doubles as the about box — there is no separate バージョン情報 window).
+        AddRow(grid, "バージョン", new Label { Text = AppVersion(), AutoSize = true, ForeColor = Theme.BodyText, Font = Theme.Font(9.5f), Margin = new Padding(0, 16, 0, 0) });
         page.Controls.Add(grid);
         return page;
     }
 
-    // ===== メール =====
-
-    private TabPage BuildMailTab()
+    // The product version as "Major.Minor.Build" (from the assembly version set in the csproj).
+    private static string AppVersion()
     {
-        var page = NewPage("メール");
-        var grid = NewGrid();
-        AddRow(grid, "差出人", BoundAscii(new TextBox(), nameof(_vm.MailFrom), 180));
-        AddRow(grid, "宛先", BoundAscii(new TextBox(), nameof(_vm.MailTo), 180));
-
-        var serverType = new ComboBox { DropDownStyle = ComboBoxStyle.DropDownList, Width = 160 };
-        foreach (var option in _vm.MailServerOptions)
-            serverType.Items.Add(option);
-        BindCombo(serverType, () => _vm.MailServerType, v => _vm.MailServerType = v, nameof(_vm.MailServerType));
-        AddRow(grid, "メールサーバー種別", serverType);
-
-        // Gmail rows (shown when 種別 = Gmail) — same row style as the rest, not a boxed sub-panel.
-        AddToggleRow(grid, "Gmail アドレス", BoundAscii(new TextBox(), nameof(_vm.GmailAddress), 180), nameof(_vm.IsGmail));
-        AddToggleRow(grid, "アプリパスワード", BoundAscii(new TextBox { UseSystemPasswordChar = true }, nameof(_vm.GmailAppPassword), 150), nameof(_vm.IsGmail));
-
-        // SMTP rows (shown when 種別 = SMTP).
-        AddToggleRow(grid, "ホスト", BoundAscii(new TextBox(), nameof(_vm.SmtpHost), 170), nameof(_vm.IsSmtp));
-        AddToggleRow(grid, "ポート", BoundNumber(nameof(_vm.SmtpPort), 5, 1, 65535), nameof(_vm.IsSmtp));
-        AddToggleRow(grid, "ユーザー名", BoundAscii(new TextBox(), nameof(_vm.SmtpUsername), 150), nameof(_vm.IsSmtp));
-        AddToggleRow(grid, "パスワード", BoundAscii(new TextBox { UseSystemPasswordChar = true }, nameof(_vm.SmtpPassword), 150), nameof(_vm.IsSmtp));
-        AddToggleRow(grid, "", BoundCheck(new CheckBox { Text = "TLS を使う", AutoSize = true }, nameof(_vm.SmtpUseTls)), nameof(_vm.IsSmtp));
-
-        page.Controls.Add(grid);
-        return page;
+        var version = System.Reflection.Assembly.GetExecutingAssembly().GetName().Version;
+        return version is null ? "1.0.0" : $"{version.Major}.{version.Minor}.{version.Build}";
     }
 
     // ===== LLM (共通 / LLM / 埋め込み) =====
@@ -202,7 +181,6 @@ internal sealed class SettingsForm : Form
         AddFieldRow(grid, ref row, "OCR モデル", ModelCombo(() => _vm.OcrModel, v => _vm.OcrModel = v, nameof(_vm.OcrModel)));
         AddFieldRow(grid, ref row, "トピック モデル", ModelCombo(() => _vm.TopicModel, v => _vm.TopicModel = v, nameof(_vm.TopicModel)));
         AddFieldRow(grid, ref row, "感情 モデル", ModelCombo(() => _vm.SentimentModel, v => _vm.SentimentModel = v, nameof(_vm.SentimentModel)));
-        AddFieldRow(grid, ref row, "レポート モデル", ModelCombo(() => _vm.ReportModel, v => _vm.ReportModel = v, nameof(_vm.ReportModel)));
 
         // 埋め込み: the embedding model + batch size (the connection is the shared one above).
         AddHeader(grid, "埋め込み", ref row);
@@ -418,17 +396,6 @@ internal sealed class SettingsForm : Form
     {
         grid.Controls.Add(MakeLabel(caption));
         grid.Controls.Add(StyleInput(input));
-    }
-
-    // A toggle row whose label + input show only while `visibleProperty` is true (Gmail / SMTP groups).
-    private void AddToggleRow(TableLayoutPanel grid, string caption, Control input, string visibleProperty)
-    {
-        var label = MakeLabel(caption);
-        StyleInput(input);
-        label.DataBindings.Add("Visible", _vm, visibleProperty);
-        input.DataBindings.Add("Visible", _vm, visibleProperty);
-        grid.Controls.Add(label);
-        grid.Controls.Add(input);
     }
 
     // A bold group header spanning both columns, with a 16 DIP gap above it (except the first group).

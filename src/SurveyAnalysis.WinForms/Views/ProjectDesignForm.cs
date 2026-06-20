@@ -98,8 +98,8 @@ internal sealed class ProjectDesignForm : Form
         base.Dispose(disposing);
     }
 
-    // Size the dialog so the 全般 tab shows about six data-item rows by default — the description box took
-    // the vertical space of the rows it replaced. Resizing still grows the scrolling list beyond six.
+    // Size the dialog so the 全般 tab shows about eight data-item rows by default (most surveys fit without
+    // scrolling). Resizing still grows the scrolling list beyond that.
     protected override void OnLoad(EventArgs e)
     {
         base.OnLoad(e);
@@ -107,7 +107,7 @@ internal sealed class ProjectDesignForm : Form
             return;
         var row = _fields.Controls[0];
         var rowHeight = row.Height + row.Margin.Vertical;
-        var desired = rowHeight * 6 + _content.Padding.Vertical;   // about six rows visible (add button scrolls below)
+        var desired = rowHeight * 8 + _content.Padding.Vertical;   // about eight rows visible (add button scrolls below)
         Height += desired - _content.ClientSize.Height;
     }
 
