@@ -96,4 +96,78 @@ public class SentimentTrendTests
         // Window restricted to June: no analysed rows → empty.
         Assert.Empty(analytics.SentimentTrend(project.Id, 20260601, 20260630));
     }
+
+    [Fact]
+    public void Scoped_to_a_region_filters_the_trend()
+    {
+        using var temp = new TempDatabase();
+        var projects = new ProjectRepository(temp.Db);
+        var responses = new ResponseRepository(temp.Db);
+        var results = new AnalysisResultsRepository(temp.Db);
+        var analytics = new AnalyticsRepository(temp.Db);
+
+        var project = new Project { Name = "P" };
+        project.Fields.Add(new DataField { Name = "記入日", FieldType = FieldType.Date, UseForAggregation = true });
+        project.Fields.Add(new DataField { Name = "都道府県", FieldType = FieldType.Address });
+        projects.Insert(project);
+
+        SurveyResponse R(string date, string pref) =>
+            new() { Answers = new[] { new FieldAnswer("記入日", date), new FieldAnswer("都道府県", pref) } };
+        responses.InsertResponses(project.Id, "t", new[] { R("2026/06/01", "東京都"), R("2026/06/02", "神奈川県"), R("2026/06/03", "東京都") });
+        var rows = responses.LoadForProjectWithIds(project.Id);
+        results.SaveRowSentiment(rows[0].Id, 0.8, false);
+        results.SaveRowSentiment(rows[1].Id, -0.4, true);
+        results.SaveRowSentiment(rows[2].Id, 0.2, false);
+        analytics.Rebuild(project);
+
+        // 東京都 only: 06/01 (+0.8) and 06/03 (+0.2).
+        var tokyo = analytics.SentimentTrendForRegion(project.Id, "東京都", null, null);
+        Assert.Equal(new[] { "6/1", "6/3" }, tokyo.Select(p => p.AxisLabel).ToArray());
+        Assert.Equal(0.8, tokyo[0].Average, 3);
+        Assert.Equal(0.2, tokyo[1].Average, 3);
+
+        // 神奈川県 only: a single 06/02 point (−0.4).
+        var kanagawa = analytics.SentimentTrendForRegion(project.Id, "神奈川県", null, null);
+        Assert.Single(kanagawa);
+        Assert.Equal(-0.4, kanagawa[0].Average, 3);
+    }
+
+    [Fact]
+    public void Scoped_to_a_topic_filters_the_trend()
+    {
+        using var temp = new TempDatabase();
+        var projects = new ProjectRepository(temp.Db);
+        var responses = new ResponseRepository(temp.Db);
+        var topics = new TopicRepository(temp.Db);
+        var results = new AnalysisResultsRepository(temp.Db);
+        var analytics = new AnalyticsRepository(temp.Db);
+
+        var project = new Project { Name = "P" };
+        project.Fields.Add(new DataField { Name = "記入日", FieldType = FieldType.Date, UseForAggregation = true });
+        var opinion = new DataField { Name = "ご意見", FieldType = FieldType.FreeText };
+        project.Fields.Add(opinion);
+        projects.Insert(project);
+
+        responses.InsertResponses(project.Id, "t", new[] { Resp("2026/06/01", "a"), Resp("2026/06/02", "b"), Resp("2026/06/03", "c") });
+        topics.ReplaceTopics(opinion.Id, new (string, float[]?)[] { ("満足", null), ("不満", null) });
+        var list = topics.ListTopics(opinion.Id);
+        var satisfied = list.First(t => t.Label == "満足").Id;
+        var dissatisfied = list.First(t => t.Label == "不満").Id;
+        var rows = responses.LoadForProjectWithIds(project.Id);
+        results.SaveRowSentiment(rows[0].Id, 0.8, false); results.SaveTopicAssignment(rows[0].Id, opinion.Id, satisfied, 0.8, false);
+        results.SaveRowSentiment(rows[1].Id, -0.4, true); results.SaveTopicAssignment(rows[1].Id, opinion.Id, dissatisfied, -0.4, true);
+        results.SaveRowSentiment(rows[2].Id, 0.2, false); results.SaveTopicAssignment(rows[2].Id, opinion.Id, satisfied, 0.2, false);
+        analytics.Rebuild(project);
+
+        // 満足-assigned responses' row sentiment over time: 06/01 (+0.8), 06/03 (+0.2).
+        var satisfiedTrend = analytics.SentimentTrendForTopic(project.Id, "満足", null, null);
+        Assert.Equal(new[] { "6/1", "6/3" }, satisfiedTrend.Select(p => p.AxisLabel).ToArray());
+        Assert.Equal(0.8, satisfiedTrend[0].Average, 3);
+        Assert.Equal(0.2, satisfiedTrend[1].Average, 3);
+
+        // 不満: only 06/02 (−0.4).
+        var dissatisfiedTrend = analytics.SentimentTrendForTopic(project.Id, "不満", null, null);
+        Assert.Single(dissatisfiedTrend);
+        Assert.Equal(-0.4, dissatisfiedTrend[0].Average, 3);
+    }
 }

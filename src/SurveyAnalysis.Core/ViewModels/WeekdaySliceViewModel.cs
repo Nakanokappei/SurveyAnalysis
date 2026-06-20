@@ -132,6 +132,8 @@ public partial class WeekdaySliceViewModel : PeriodScopedViewModel, ISliceView
     private void ShowResponsesFor(int dayOfWeek, string label)
     {
         var (from, to) = Window;
+        // The trend follows the drill: scoped to just this weekday.
+        SentimentTrend = _analytics.SentimentTrendForWeekday(_projectId, dayOfWeek, from, to);
         TotalRow = null; // the 個票 list has no column table
         Responses.Clear();
         foreach (var response in _analytics.ResponsesWithAnalysisForWeekday(_projectId, dayOfWeek, from, to))

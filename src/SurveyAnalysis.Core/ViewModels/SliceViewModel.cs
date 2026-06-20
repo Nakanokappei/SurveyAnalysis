@@ -118,6 +118,11 @@ public partial class SliceViewModel : PeriodScopedViewModel, ISliceView
             ? _analytics.ResponsesWithAnalysisForTopic(_projectId, row.Label, from, to, _topicFieldId > 0 ? _topicFieldId : null)
             : _analytics.ResponsesWithAnalysisForRegion(_projectId, row.Label, from, to);
 
+        // The trend follows the drill: scoped to the selected region / topic.
+        SentimentTrend = _grouping == AnalysisGrouping.Topic
+            ? _analytics.SentimentTrendForTopic(_projectId, row.Label, from, to, _topicFieldId > 0 ? _topicFieldId : null)
+            : _analytics.SentimentTrendForRegion(_projectId, row.Label, from, to);
+
         TotalRow = null;   // the 個票 list has no column table
         Responses.Clear();
         foreach (var response in responses)

@@ -302,63 +302,111 @@ public sealed class AnalyticsRepository
 
     // The average row sentiment over the 集計期間 window (chronological), bucketed by day when the dated
     // scored data spans ≤ 30 days and by ISO week otherwise — a short period reads day-by-day, a long one
-    // stays legible. Buckets with no analysed response are omitted, so the line connects only buckets with
-    // data. Dateless facts (no date_key) are excluded by the dim_date join. Drives the 感情極性の推移 line.
+    // stays legible. Buckets with no analysed response are omitted. Dateless facts are excluded by the
+    // dim_date join. Drives the 感情極性の推移 line; the *For… overloads scope it to a drilled selection so
+    // the line follows a drill-down / -up.
     public IReadOnlyList<SentimentTrendPoint> SentimentTrend(long projectId, long? fromKey, long? toKey)
+        => SentimentTrend(projectId, fromKey, toKey, TrendFilter.ForScope(TimeScope.Root));
+
+    // Scoped to a 時間別 drill scope (年度 / 月 / 週 / 日), so drilling zooms the trend into that period.
+    public IReadOnlyList<SentimentTrendPoint> SentimentTrendForScope(long projectId, TimeScope scope, long? fromKey, long? toKey)
+        => SentimentTrend(projectId, fromKey, toKey, TrendFilter.ForScope(scope));
+
+    // Scoped to one 都道府県 (the 地域別 drill); （未設定） matches responses with no parsed region.
+    public IReadOnlyList<SentimentTrendPoint> SentimentTrendForRegion(long projectId, string prefecture, long? fromKey, long? toKey)
+        => SentimentTrend(projectId, fromKey, toKey, RegionTrendFilter(prefecture));
+
+    // Scoped to one topic (the トピック別 drill); （未分析） matches responses with no topic. topicFieldId
+    // limits it to one 質問's topic when the report is per-question.
+    public IReadOnlyList<SentimentTrendPoint> SentimentTrendForTopic(long projectId, string topicLabel, long? fromKey, long? toKey, long? topicFieldId = null)
+        => SentimentTrend(projectId, fromKey, toKey, TopicTrendFilter(topicLabel, topicFieldId));
+
+    // Scoped to one weekday (the 曜日 drill): the trend over time of just that day-of-week.
+    public IReadOnlyList<SentimentTrendPoint> SentimentTrendForWeekday(long projectId, int dayOfWeek, long? fromKey, long? toKey)
+        => SentimentTrend(projectId, fromKey, toKey, WeekdayTrendFilter(dayOfWeek));
+
+    // One query: the average row sentiment per day (with its ISO-week attributes) for the filtered facts.
+    // If the span is ≤ 30 days the days are the points; otherwise they are merged into ISO weeks (a
+    // count-weighted average), so a long period stays legible without a second round-trip to the database.
+    private IReadOnlyList<SentimentTrendPoint> SentimentTrend(long projectId, long? fromKey, long? toKey, TrendFilter filter)
     {
         using var connection = _db.Open();
-
-        // The span of the dated, scored facts in the window picks the bucket: ≤ 30 days → daily, else weekly.
-        long minKey, maxKey;
-        using (var spanCommand = connection.CreateCommand())
-        {
-            spanCommand.Parameters.AddWithValue("$pid", projectId);
-            var spanWhere = ScopeWhere(TimeScope.Root, fromKey, toKey, spanCommand);
-            spanCommand.CommandText =
-                "SELECT MIN(f.date_key), MAX(f.date_key) FROM fact_response f "
-                + $"JOIN dim_date d ON f.date_key = d.date_key WHERE {spanWhere} AND f.sentiment_score IS NOT NULL";
-            using var spanReader = spanCommand.ExecuteReader();
-            if (!spanReader.Read() || spanReader.IsDBNull(0))
-                return Array.Empty<SentimentTrendPoint>();
-            minKey = spanReader.GetInt64(0);
-            maxKey = spanReader.GetInt64(1);
-        }
-        var daily = (KeyToDate(maxKey) - KeyToDate(minKey)).Days <= 30;
-
         using var command = connection.CreateCommand();
         command.Parameters.AddWithValue("$pid", projectId);
-        var where = ScopeWhere(TimeScope.Root, fromKey, toKey, command);
-        // Daily: one row per date. Weekly: one row per ISO week, keyed by its earliest dated day and
-        // labelled with the week (2026年 第21週). Both carry a representative date_key for the short axis label.
-        command.CommandText = daily
-            ? $"""
-                SELECT d.date_key AS k, '' AS lbl, AVG(f.sentiment_score) AS avg, COUNT(f.sentiment_score) AS n
-                FROM fact_response f
-                JOIN dim_date d ON f.date_key = d.date_key
-                WHERE {where} AND f.sentiment_score IS NOT NULL
-                GROUP BY d.date_key
-                ORDER BY d.date_key;
-                """
-            : $"""
-                SELECT MIN(d.date_key) AS k, d.week_label AS lbl, AVG(f.sentiment_score) AS avg, COUNT(f.sentiment_score) AS n
-                FROM fact_response f
-                JOIN dim_date d ON f.date_key = d.date_key
-                WHERE {where} AND f.sentiment_score IS NOT NULL
-                GROUP BY d.week_year, d.week_of_year
-                ORDER BY d.week_year, d.week_of_year;
-                """;
+        var (joins, extra) = filter.Build(command);
+        var where = ScopeWhere(filter.Scope, fromKey, toKey, command) + extra;
+        command.CommandText =
+            "SELECT d.date_key AS k, d.week_year AS wy, d.week_of_year AS wo, d.week_label AS wlabel, "
+            + "AVG(f.sentiment_score) AS avg, COUNT(f.sentiment_score) AS n "
+            + $"FROM fact_response f JOIN dim_date d ON f.date_key = d.date_key {joins} "
+            + $"WHERE {where} AND f.sentiment_score IS NOT NULL GROUP BY d.date_key ORDER BY d.date_key;";
 
-        var points = new List<SentimentTrendPoint>();
-        using var reader = command.ExecuteReader();
-        while (reader.Read())
-        {
-            var date = KeyToDate(reader.GetInt64(0));
-            var axisLabel = $"{date.Month}/{date.Day}";
-            var label = daily ? date.ToString("yyyy/MM/dd") : reader.GetString(1);
-            points.Add(new SentimentTrendPoint(axisLabel, label, reader.GetDouble(2), reader.GetInt32(3)));
-        }
-        return points;
+        var days = new List<(long Key, int WeekYear, int WeekOfYear, string WeekLabel, double Avg, int Count)>();
+        using (var reader = command.ExecuteReader())
+            while (reader.Read())
+                days.Add((reader.GetInt64(0), reader.GetInt32(1), reader.GetInt32(2), reader.GetString(3), reader.GetDouble(4), reader.GetInt32(5)));
+        if (days.Count == 0)
+            return Array.Empty<SentimentTrendPoint>();
+
+        // ≤ 30-day span → one point per day.
+        if ((KeyToDate(days[^1].Key) - KeyToDate(days[0].Key)).Days <= 30)
+            return days.Select(d => TrendPoint(d.Key, KeyToDate(d.Key).ToString("yyyy/MM/dd"), d.Avg, d.Count)).ToList();
+
+        // Otherwise merge the days into ISO weeks (count-weighted average), keyed by each week's first day.
+        return days
+            .GroupBy(d => (d.WeekYear, d.WeekOfYear))
+            .OrderBy(g => g.Key.WeekYear).ThenBy(g => g.Key.WeekOfYear)
+            .Select(g =>
+            {
+                var count = g.Sum(d => d.Count);
+                var avg = count == 0 ? 0 : g.Sum(d => d.Avg * d.Count) / count;
+                return TrendPoint(g.Min(d => d.Key), g.First().WeekLabel, avg, count);
+            })
+            .ToList();
     }
+
+    // A trend point from a representative date_key: the short axis label is that date's M/d.
+    private static SentimentTrendPoint TrendPoint(long key, string label, double average, int count)
+    {
+        var date = KeyToDate(key);
+        return new SentimentTrendPoint($"{date.Month}/{date.Day}", label, average, count);
+    }
+
+    // A trend's fact-filter: the time scope, plus a builder that binds its dimension params on a command and
+    // returns any extra JOIN(s) and an extra WHERE fragment (already prefixed with " AND ", or empty).
+    private sealed record TrendFilter(TimeScope Scope, Func<SqliteCommand, (string Joins, string Where)> Build)
+    {
+        public static TrendFilter ForScope(TimeScope scope) => new(scope, _ => ("", ""));
+    }
+
+    private static TrendFilter RegionTrendFilter(string prefecture) => new(TimeScope.Root, command =>
+    {
+        const string join = "LEFT JOIN dim_region g ON f.region_key = g.region_key";
+        if (prefecture == UnsetRegion)
+            return (join, " AND f.region_key IS NULL");
+        command.Parameters.AddWithValue("$pref", prefecture);
+        return (join, " AND g.prefecture = $pref");
+    });
+
+    private static TrendFilter TopicTrendFilter(string topicLabel, long? topicFieldId) => new(TimeScope.Root, command =>
+    {
+        var fieldClause = "";
+        if (topicFieldId is { } tf)
+        {
+            fieldClause = " AND z.field_id = $tf";
+            command.Parameters.AddWithValue("$tf", tf);
+        }
+        if (topicLabel == UnanalyzedTopic)
+            return ("", $" AND NOT EXISTS (SELECT 1 FROM fact_response_topic z WHERE z.fact_id = f.fact_id AND z.topic_key IS NOT NULL{fieldClause})");
+        command.Parameters.AddWithValue("$label", topicLabel);
+        return ("", $" AND EXISTS (SELECT 1 FROM fact_response_topic z JOIN dim_topic zt ON zt.topic_key = z.topic_key WHERE z.fact_id = f.fact_id AND zt.label = $label{fieldClause})");
+    });
+
+    private static TrendFilter WeekdayTrendFilter(int dayOfWeek) => new(TimeScope.Root, command =>
+    {
+        command.Parameters.AddWithValue("$dow", dayOfWeek);
+        return ("", " AND d.day_of_week = $dow");
+    });
 
     // A yyyymmdd date_key as a DateTime — for span maths and the short axis label.
     private static DateTime KeyToDate(long key) =>
