@@ -625,11 +625,9 @@ public sealed class MainForm : Form
         form.ShowDialog(this);
     }
 
-    // ===== 画像から取り込む（フォルダ選択 → OCR → 仮テーブル → 校正 → 回答） =====
+    // ===== 画像から取り込む（ファイル選択 → OCR → 仮テーブル → 校正 → 回答） =====
 
-    private static readonly string[] ScanImageExtensions = { ".jpg", ".jpeg", ".png", ".webp" };
-
-    // 画像から取り込む。毎回フォルダを選ばせ（前回の場所を既定にし、選んだ場所を記憶）、その直下の画像を
+    // 画像から取り込む。毎回画像ファイルを選ばせ（前回のフォルダを既定にし、選んだ場所を記憶）、それを
     // vision OCR で読み取って「仮テーブル」(image_import_staging) に貯める。続いて校正画面で画像と読み取り
     // 値を見比べ、レコードごとに「取り込む」で初めて responses へ確定。確定があれば CSV と同じ感情/トピック
     // 解析 → スター再投影 → ダッシュボードを行う。確定するまで実データには一切入らない。
@@ -645,23 +643,31 @@ public sealed class MainForm : Form
             return;
         }
 
-        // Pick the folder each time, defaulting to (and remembering) the last-used location.
-        string folder;
-        using (var picker = new FolderBrowserDialog { Description = "読み取る画像のあるフォルダを選択", SelectedPath = settings.ScanFolderPath, UseDescriptionForTitle = true })
+        // Pick the image files each time — a file picker (not a folder picker) so the scans are visible and
+        // selectable directly; several can be chosen at once. Defaults to (and remembers) the last-used
+        // folder. Cancelling with a previous batch still left staged proceeds straight to review.
+        List<string> images;
+        using (var picker = new OpenFileDialog
         {
-            if (picker.ShowDialog(this) != DialogResult.OK)
+            Title = "読み取る画像を選択（複数選択できます）",
+            Multiselect = true,
+            Filter = "画像ファイル (*.png;*.jpg;*.jpeg;*.webp)|*.png;*.jpg;*.jpeg;*.webp|すべてのファイル (*.*)|*.*",
+            InitialDirectory = Directory.Exists(settings.ScanFolderPath) ? settings.ScanFolderPath : "",
+        })
+        {
+            if (picker.ShowDialog(this) == DialogResult.OK)
+                images = picker.FileNames.ToList();
+            else if (AppServices.ImageStaging.CountForProject(project.Id) > 0)
+                images = new List<string>();   // nothing newly picked — resume the staged batch in review
+            else
                 return;
-            folder = picker.SelectedPath;
         }
-        settings.ScanFolderPath = folder;
-        settings.Save();   // remember as next time's default
 
-        var images = EnumerateScanImages(folder);
-        if (images.Count == 0 && AppServices.ImageStaging.CountForProject(project.Id) == 0)
+        // Remember the folder of the picked files as next time's default.
+        if (images.Count > 0)
         {
-            MessageBox.Show(this, $"フォルダに画像が見つかりませんでした。\n{folder}",
-                "画像から取り込む", MessageBoxButtons.OK, MessageBoxIcon.Information);
-            return;
+            settings.ScanFolderPath = Path.GetDirectoryName(images[0]) ?? settings.ScanFolderPath;
+            settings.Save();
         }
 
         // OCR any newly picked images into the staging table (each is a paid vision request — confirm the
@@ -740,15 +746,6 @@ public sealed class MainForm : Form
             progress.Report((done, total));
         }
     }
-
-    // Image files directly under the chosen folder, sorted by name for a stable processing order.
-    private static List<string> EnumerateScanImages(string folder) =>
-        Directory.Exists(folder)
-            ? Directory.EnumerateFiles(folder)
-                .Where(f => ScanImageExtensions.Contains(Path.GetExtension(f).ToLowerInvariant()))
-                .OrderBy(f => f, StringComparer.OrdinalIgnoreCase)
-                .ToList()
-            : new List<string>();
 
     // The data-URL media type for an image path (defaults to JPEG for .jpg/.jpeg and anything unexpected).
     private static string MediaTypeFor(string path) => Path.GetExtension(path).ToLowerInvariant() switch
