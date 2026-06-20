@@ -92,24 +92,6 @@ public class OcrExtractorTests
         Assert.DoesNotContain("ご意見（選択肢", prompt);                 // free-text field gets no option list
     }
 
-    [Fact]
-    public async Task Refusal_drops_the_PII_fields_and_reads_the_rest()
-    {
-        // The first call (all fields) is refused; the retry (non-PII only) succeeds — so the PII field is
-        // dropped, the rest is read, and the retry's prompt no longer mentions the PII field.
-        var llm = new RefuseThenAnswer("""{"記入日":"2026/05/20","満足度":4,"ご意見":"丁寧でした"}""");
-
-        var values = await new OcrExtractor(llm, "gpt-4o").ExtractAsync(
-            new byte[] { 1 }, "image/png", Fields(), "");
-
-        Assert.False(values.ContainsKey("氏名"));   // PII dropped after the refusal
-        Assert.Equal("2026/05/20", values["記入日"]);
-        Assert.Equal("丁寧でした", values["ご意見"]);
-
-        Assert.Equal(2, llm.Calls);
-        Assert.DoesNotContain("氏名", llm.LastRequest!.Messages.Single(m => m.Role == "user").Content);
-    }
-
     // A chat client that records the last request and replies with a fixed body.
     private sealed class CaptureChat : IChatClient
     {
@@ -120,25 +102,6 @@ public class OcrExtractorTests
         public Task<ChatResult> CompleteAsync(ChatRequest request, CancellationToken ct = default)
         {
             LastRequest = request;
-            return Task.FromResult(new ChatResult(_reply, request.Model, null, null, false));
-        }
-    }
-
-    // A chat client that refuses (empty response) on the first call, then answers — to exercise the OCR's
-    // fall-back-without-PII path.
-    private sealed class RefuseThenAnswer : IChatClient
-    {
-        private readonly string _reply;
-        public int Calls { get; private set; }
-        public ChatRequest? LastRequest { get; private set; }
-        public RefuseThenAnswer(string reply) => _reply = reply;
-
-        public Task<ChatResult> CompleteAsync(ChatRequest request, CancellationToken ct = default)
-        {
-            Calls++;
-            LastRequest = request;
-            if (Calls == 1)
-                throw new LlmEmptyResponseException("refused", "モデルが応答を拒否しました");
             return Task.FromResult(new ChatResult(_reply, request.Model, null, null, false));
         }
     }
