@@ -129,6 +129,23 @@ public sealed class AnalyticsRepository
         transaction.Commit();
     }
 
+    // The (year, month) pairs that have at least one dated response, newest first — drives the 月次レポート
+    // month picker. Dateless facts (no date_key) are excluded by the join.
+    public IReadOnlyList<(int Year, int Month)> AvailableMonths(long projectId)
+    {
+        using var connection = _db.Open();
+        using var command = connection.CreateCommand();
+        command.Parameters.AddWithValue("$pid", projectId);
+        command.CommandText =
+            "SELECT DISTINCT d.year, d.month FROM fact_response f JOIN dim_date d ON f.date_key = d.date_key "
+            + "WHERE f.project_id = $pid ORDER BY d.year DESC, d.month DESC;";
+        var months = new List<(int, int)>();
+        using var reader = command.ExecuteReader();
+        while (reader.Read())
+            months.Add((reader.GetInt32(0), reader.GetInt32(1)));
+        return months;
+    }
+
     // ===== Drill-down terminal: 個票一覧 =====
 
     // The individual responses within a scope (the terminal 個票一覧), each as a field-name→value map

@@ -14,7 +14,6 @@ internal static class Icons
     public static readonly (string Font, string Glyph) Collapse = (Theme.Wingdings3, "u");  // ▶
     public static readonly (string Font, string Glyph) Expand   = (Theme.Wingdings3, "q");  // ▼
     public static readonly (string Font, string Glyph) Bullet   = (Theme.Wingdings3, "u");  // ▶
-    public static readonly (string Font, string Glyph) Export   = (Theme.Wingdings3, "#");  // ↑
     public static readonly (string Font, string Glyph) Back     = (Theme.Wingdings3, "!");  // ←
     public static readonly (string Font, string Glyph) Reset    = (Theme.Wingdings3, "Q");  // ↺
 
@@ -33,6 +32,8 @@ internal static class Icons
 
     // Pictographs with no good Webdings equivalent — box-free Segoe UI Emoji.
     public static readonly (string Font, string Glyph) Dashboard = (Theme.IconFontName, "📊");
+    // エクスポート（月次レポート PDF）— 書類マーク（旧 ↑ 矢印から変更）。
+    public static readonly (string Font, string Glyph) Export    = (Theme.IconFontName, "📄");
     public static readonly (string Font, string Glyph) Add       = (Theme.IconFontName, "➕");
     public static readonly (string Font, string Glyph) Image     = (Theme.IconFontName, "🖼");
     public static readonly (string Font, string Glyph) Folder    = (Theme.IconFontName, "📁");

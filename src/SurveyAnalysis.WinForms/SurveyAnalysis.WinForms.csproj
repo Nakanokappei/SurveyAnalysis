@@ -29,4 +29,8 @@
     <ProjectReference Include="..\SurveyAnalysis.Core\SurveyAnalysis.Core.csproj" />
   </ItemGroup>
 
+  <ItemGroup>
+    <PackageReference Include="QuestPDF" Version="2026.6.0" />
+  </ItemGroup>
+
 </Project>

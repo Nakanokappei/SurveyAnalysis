@@ -11,6 +11,7 @@ using System.Windows.Forms;
 using SurveyAnalysis.Data;
 using SurveyAnalysis.Llm.Consumers;
 using SurveyAnalysis.Models;
+using SurveyAnalysis.Reports;
 using SurveyAnalysis.ViewModels;
 
 namespace SurveyAnalysis.WinForms;
@@ -287,7 +288,7 @@ public sealed class MainForm : Form
             AddRow(bottom, NavButton(Icons.Add, "インポート (CSV)", () => _shell.ImportCommand.Execute(null)));
             AddRow(bottom, NavButton(Icons.Image, "画像を読み込む", () => _shell.ImportImagesCommand.Execute(null)));
             AddRow(bottom, NavButton(Icons.Folder, "フォルダから画像を読み込む", () => _shell.ImportImagesFromFolderCommand.Execute(null)));
-            AddRow(bottom, NavButton(Icons.Export, "エクスポート", OnExportNotImplemented));
+            AddRow(bottom, NavButton(Icons.Export, "エクスポート", OnExport));
             // 閉じる is a project action too, so no divider line above it — but it is set apart from the
             // import/export pair by extra spacing (a wider top margin) so it still reads as distinct.
             var close = NavButton(Icons.Close, "プロジェクトを閉じる", OnCloseProject);
@@ -872,10 +873,98 @@ public sealed class MainForm : Form
         viewModel.Save();
     }
 
-    // エクスポートはメニューだけ先に用意した段階（機能は未実装）。
-    private void OnExportNotImplemented() =>
-        MessageBox.Show(this, "エクスポート機能は今後実装予定です。", "エクスポート",
-            MessageBoxButtons.OK, MessageBoxIcon.Information);
+    // エクスポート → 月次レポート（PDF）を発行。対象月を選び、その月の集計（KPI・感情分布・トピック別件数）を
+    // QuestPDF で1枚にまとめ、ユーザーが選んだ場所に保存してから開くか尋ねる。
+    private void OnExport()
+    {
+        if (_shell.CurrentProject is not { } project)
+            return;
+
+        var months = AppServices.Analytics.AvailableMonths(project.Id);
+        if (months.Count == 0)
+        {
+            MessageBox.Show(this, "月次レポートを発行できる回答がありません。先に回答を取り込んでください。",
+                "月次レポート", MessageBoxButtons.OK, MessageBoxIcon.Information);
+            return;
+        }
+
+        if (PromptForMonth(months) is not { } picked)
+            return;
+        var (year, month) = picked;
+
+        var company = new SettingsViewModel(AppServices.Settings).CompanyName;
+        var data = MonthlyReportBuilder.Build(AppServices.Analytics, project, company, year, month);
+
+        static string Safe(string name)
+        {
+            var invalid = Path.GetInvalidFileNameChars();
+            return new string(name.Select(ch => invalid.Contains(ch) ? '_' : ch).ToArray()).Trim();
+        }
+
+        using var dialog = new SaveFileDialog
+        {
+            Filter = "PDF ファイル (*.pdf)|*.pdf",
+            FileName = $"{Safe(project.Name)}_月次レポート_{year}年{month}月.pdf",
+            AddExtension = true,
+            DefaultExt = "pdf",
+        };
+        if (dialog.ShowDialog(this) != DialogResult.OK)
+            return;
+
+        try
+        {
+            MonthlyReportPdf.Save(data, dialog.FileName);
+        }
+        catch (Exception ex)
+        {
+            MessageBox.Show(this, $"PDF の生成に失敗しました。\n{ex.Message}", "月次レポート", MessageBoxButtons.OK, MessageBoxIcon.Error);
+            return;
+        }
+
+        if (MessageBox.Show(this, "月次レポートを発行しました。開きますか？", "月次レポート", MessageBoxButtons.YesNo, MessageBoxIcon.Information) == DialogResult.Yes)
+            Process.Start(new ProcessStartInfo(dialog.FileName) { UseShellExecute = true });
+    }
+
+    // A small month picker for the 月次レポート: a dropdown of the months that have data (newest first), with
+    // 発行 / キャンセル. Returns the chosen (year, month), or null on cancel.
+    private (int Year, int Month)? PromptForMonth(IReadOnlyList<(int Year, int Month)> months)
+    {
+        using var form = new Form
+        {
+            Text = "月次レポートの発行", FormBorderStyle = FormBorderStyle.FixedDialog, StartPosition = FormStartPosition.CenterParent,
+            MaximizeBox = false, MinimizeBox = false, ShowInTaskbar = false, Font = Theme.Font(),
+            AutoScaleMode = AutoScaleMode.Dpi, AutoScaleDimensions = new SizeF(96F, 96F),
+            BackColor = Theme.ContentBack,
+            ClientSize = new Size(LogicalToDeviceUnits(340), LogicalToDeviceUnits(150)),
+        };
+
+        var combo = new ComboBox { DropDownStyle = ComboBoxStyle.DropDownList, Font = Theme.Font(10f), Anchor = AnchorStyles.Left | AnchorStyles.Right, Margin = new Padding(0, 2, 0, 0) };
+        foreach (var (y, m) in months)
+            combo.Items.Add($"{y}年{m}月");
+        combo.SelectedIndex = 0;   // newest first
+
+        var content = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 1, RowCount = 2, Padding = new Padding(16, 16, 16, 0), BackColor = Theme.ContentBack };
+        content.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
+        content.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+        content.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+        content.Controls.Add(new Label { Text = "対象月を選んでください。", AutoSize = true, ForeColor = Theme.BodyText, Anchor = AnchorStyles.Left, Margin = new Padding(0, 0, 0, 6) }, 0, 0);
+        content.Controls.Add(combo, 0, 1);
+
+        var ok = new Button { Text = "発行", DialogResult = DialogResult.OK, AutoSize = true, AutoSizeMode = AutoSizeMode.GrowAndShrink, FlatStyle = FlatStyle.Flat, BackColor = Theme.Accent, ForeColor = Color.White, Font = Theme.Font(9.5f, FontStyle.Bold), Padding = new Padding(16, 6, 16, 6), Margin = new Padding(8, 0, 0, 0), Cursor = Cursors.Hand };
+        ok.FlatAppearance.BorderSize = 0;
+        var cancel = new Button { Text = "キャンセル", DialogResult = DialogResult.Cancel, AutoSize = true, AutoSizeMode = AutoSizeMode.GrowAndShrink, FlatStyle = FlatStyle.Flat, BackColor = Color.White, ForeColor = Theme.BodyText, Font = Theme.Font(9.5f), Padding = new Padding(12, 6, 12, 6), Cursor = Cursors.Hand };
+        cancel.FlatAppearance.BorderColor = Theme.CardBorder;
+        var buttons = new FlowLayoutPanel { Dock = DockStyle.Bottom, FlowDirection = FlowDirection.RightToLeft, WrapContents = false, AutoSize = true, AutoSizeMode = AutoSizeMode.GrowAndShrink, BackColor = Theme.ContentBack, Padding = new Padding(16, 8, 16, 12) };
+        buttons.Controls.Add(ok);
+        buttons.Controls.Add(cancel);
+
+        form.Controls.Add(content);   // Fill — add first so it yields the bottom strip
+        form.Controls.Add(buttons);   // Bottom
+        form.AcceptButton = ok;
+        form.CancelButton = cancel;
+
+        return form.ShowDialog(this) == DialogResult.OK && combo.SelectedIndex >= 0 ? months[combo.SelectedIndex] : null;
+    }
 
     // Placeholder for a dialog/screen not yet migrated, so navigation never dead-ends during the port.
     private void ShowPending(string what) =>

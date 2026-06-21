@@ -12,6 +12,8 @@ internal static class Program
     [STAThread]
     private static void Main()
     {
+        // QuestPDF (月次レポートの PDF 生成) is used under its free Community license.
+        QuestPDF.Settings.License = QuestPDF.Infrastructure.LicenseType.Community;
         Application.EnableVisualStyles();
         Application.SetCompatibleTextRenderingDefault(false);
         Application.SetHighDpiMode(HighDpiMode.PerMonitorV2);
