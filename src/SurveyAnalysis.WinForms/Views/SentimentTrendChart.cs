@@ -34,6 +34,10 @@ internal sealed class SentimentTrendChart : Control
     {
         _points = points ?? Array.Empty<SentimentTrendPoint>();
         _hoverIndex = -1;
+        // Drop the old hit-test positions immediately: until the next paint rebuilds them they index the
+        // previous (possibly longer) data, so a mouse move between SetData and the repaint would read past
+        // the new _points. Clearing makes hit-testing find nothing until the markers match the data again.
+        _markers.Clear();
         Invalidate();
     }
 

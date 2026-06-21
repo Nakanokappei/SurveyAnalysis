@@ -48,6 +48,9 @@ internal static class Theme
     public const string Webdings = "Webdings";
     public const string Wingdings = "Wingdings";
     public const string Wingdings3 = "Wingdings 3";
+    // Segoe MDL2 Assets ships with Windows 10/11; its thin ChevronRight/Down are the native, refined
+    // disclosure arrows — lighter and smaller-feeling than the Wingdings 3 filled triangle.
+    public const string SegoeIcon = "Segoe MDL2 Assets";
 
     public static Font IconFont(float size = 9f, FontStyle style = FontStyle.Regular) => new(IconFontName, size, style);
 

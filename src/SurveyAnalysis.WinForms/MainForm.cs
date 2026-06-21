@@ -273,9 +273,9 @@ public sealed class MainForm : Form
             ? LogicalToDeviceUnits(300)
             : ClientSize.Width / 4;
 
-        // Bottom actions (docked bottom). While a project is open: the data I/O pair (import / export),
-        // then the schema editor (データ項目), then close — each group set off by a divider. 設定 is
-        // app-wide and always present at the very bottom.
+        // Bottom action: 設定 is app-wide and stays pinned at the very bottom. The project data actions
+        // (インポート / エクスポート / 閉じる) now sit at the end of the scrollable nav above, so the
+        // scrollbar reaches them on a short window; a divider sets 設定 off from them.
         var bottom = NavStack();
         bottom.Dock = DockStyle.Bottom;
         bottom.AutoSize = true;
@@ -284,18 +284,7 @@ public sealed class MainForm : Form
         // text (no bottom margin), so the panel contributes the remaining 14.
         bottom.Padding = new Padding(0, LogicalToDeviceUnits(8), 0, LogicalToDeviceUnits(14));
         if (_shell.IsProjectOpen)
-        {
-            AddRow(bottom, NavButton(Icons.Add, "インポート (CSV)", () => _shell.ImportCommand.Execute(null)));
-            AddRow(bottom, NavButton(Icons.Image, "画像を読み込む", () => _shell.ImportImagesCommand.Execute(null)));
-            AddRow(bottom, NavButton(Icons.Folder, "フォルダから画像を読み込む", () => _shell.ImportImagesFromFolderCommand.Execute(null)));
-            AddRow(bottom, NavButton(Icons.Export, "エクスポート", OnExport));
-            // 閉じる is a project action too, so no divider line above it — but it is set apart from the
-            // import/export pair by extra spacing (a wider top margin) so it still reads as distinct.
-            var close = NavButton(Icons.Close, "プロジェクトを閉じる", OnCloseProject);
-            close.Margin = new Padding(close.Margin.Left, LogicalToDeviceUnits(20), close.Margin.Right, close.Margin.Bottom);
-            AddRow(bottom, close);
-            AddRow(bottom, Divider());   // set 設定 off from the project actions above it
-        }
+            AddRow(bottom, Divider());   // set 設定 off from the project actions in the scroll above
         AddRow(bottom, NavButton(Icons.Settings, "設定", OnSettings));
 
         // Main navigation fills the space above the bottom actions. It can now grow tall (each 軸 expands
@@ -367,6 +356,18 @@ public sealed class MainForm : Form
             AddRow(nav, NavButton(_shell.IsChoiceExpanded ? Icons.Expand : Icons.Collapse, "選択肢別", () => _shell.ToggleChoiceCommand.Execute(null)));
             if (_shell.IsChoiceExpanded)
                 AddQuestionSubmenu(nav, _shell.ChoiceQuestions, "（選択肢の質問がありません）", id => _shell.OpenChoiceQuestion(id));
+
+            // Data actions (インポート / エクスポート) and 閉じる sit at the end of the scrollable list — set
+            // off from the report navigation by a divider — so a short window scrolls down to reach them.
+            AddRow(nav, Divider());
+            AddRow(nav, NavButton(Icons.Add, "インポート (CSV)", () => _shell.ImportCommand.Execute(null)));
+            AddRow(nav, NavButton(Icons.Image, "画像を読み込む", () => _shell.ImportImagesCommand.Execute(null)));
+            AddRow(nav, NavButton(Icons.Folder, "フォルダから画像を読み込む", () => _shell.ImportImagesFromFolderCommand.Execute(null)));
+            AddRow(nav, NavButton(Icons.Export, "エクスポート", OnExport));
+            // 閉じる is set apart from the import/export group by extra top spacing so it reads as distinct.
+            var close = NavButton(Icons.Close, "プロジェクトを閉じる", OnCloseProject);
+            close.Margin = new Padding(close.Margin.Left, LogicalToDeviceUnits(20), close.Margin.Right, close.Margin.Bottom);
+            AddRow(nav, close);
         }
 
         navScroll.Controls.Add(nav);       // Top + AutoSize inside the scroll host (no filler row needed)

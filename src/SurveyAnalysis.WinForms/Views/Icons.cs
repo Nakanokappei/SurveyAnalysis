@@ -3,16 +3,21 @@ namespace SurveyAnalysis.WinForms;
 // The app's button icons as (font, glyph) pairs, in one place. Directional icons come from the Webdings
 // family so they render as clean, box-free monochrome symbols (Segoe UI Emoji encloses arrows/triangles
 // in a rounded box). The Wingdings/Webdings glyph is the ASCII character that maps to the symbol in that
-// font (e.g. "u" in Wingdings 3 is ▶). Pictographs with no good Webdings equivalent stay on Segoe UI
-// Emoji, which draws them box-free anyway. IconButton renders Glyph in Font; an empty Glyph = no icon.
+// font (e.g. "u" in Wingdings 3 is the right triangle). The disclosure chevrons use Segoe MDL2 Assets,
+// addressed by Private-Use codepoint ( = ChevronRight,  = ChevronDown). Pictographs with no
+// good Webdings equivalent stay on Segoe UI Emoji, which draws them box-free anyway. IconButton renders
+// Glyph in Font; an empty Glyph = no icon.
 internal static class Icons
 {
     // No icon (caption only) — e.g. the sub-nav items.
     public static readonly (string Font, string Glyph) None = (Theme.IconFontName, "");
 
+    // Disclosure chevrons — the native Windows thin chevrons (Segoe MDL2 Assets), refined and box-free.
+    // Collapse is shown while collapsed (points right → "expand me"); Expand while expanded (points down).
+    public static readonly (string Font, string Glyph) Collapse = (Theme.SegoeIcon, "");  // ChevronRight
+    public static readonly (string Font, string Glyph) Expand   = (Theme.SegoeIcon, "");  // ChevronDown
+
     // Directional — Wingdings 3 (clean triangles/arrows, no box).
-    public static readonly (string Font, string Glyph) Collapse = (Theme.Wingdings3, "u");  // ▶
-    public static readonly (string Font, string Glyph) Expand   = (Theme.Wingdings3, "q");  // ▼
     public static readonly (string Font, string Glyph) Bullet   = (Theme.Wingdings3, "u");  // ▶
     public static readonly (string Font, string Glyph) Back     = (Theme.Wingdings3, "!");  // ←
     public static readonly (string Font, string Glyph) Reset    = (Theme.Wingdings3, "Q");  // ↺
