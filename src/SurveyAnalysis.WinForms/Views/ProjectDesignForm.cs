@@ -127,8 +127,14 @@ internal sealed class ProjectDesignForm : Form
             Padding = new Point(LogicalToDeviceUnits(16), LogicalToDeviceUnits(5)),
         };
         _tabs.TabPages.Add(BuildGeneralTab());
-        _tabs.TabPages.Add(BuildTopicsTab());
-        _tabs.SelectedIndexChanged += (_, _) => { if (_tabs.SelectedIndex == 1) RefreshTopicColumns(); };
+        // The CSV-seeded create flow has no saved columns yet (field ids are 0), so the topic dictionary
+        // can't be managed there — the tab would only show "保存後に…" hints. Omit it in that flow; manual
+        // create / edit keep it.
+        if (_vm.SourceCsv is null)
+        {
+            _tabs.TabPages.Add(BuildTopicsTab());
+            _tabs.SelectedIndexChanged += (_, _) => { if (_tabs.SelectedIndex == 1) RefreshTopicColumns(); };
+        }
 
         Controls.Add(_tabs);            // Fill — add first so the bar keeps the bottom
         Controls.Add(BuildActionBar());  // Bottom
