@@ -44,4 +44,7 @@ internal static class Icons
     public static readonly (string Font, string Glyph) Folder    = (Theme.IconFontName, "📁");
     public static readonly (string Font, string Glyph) Settings  = (Theme.IconFontName, "⚙");
     public static readonly (string Font, string Glyph) Calendar  = (Theme.IconFontName, "📅");
+
+    // Info (バージョン情報) — the native Windows "Info" glyph (Segoe MDL2 Assets), clean and box-free.
+    public static readonly (string Font, string Glyph) Info      = (Theme.SegoeIcon, "");  // Info ⓘ
 }

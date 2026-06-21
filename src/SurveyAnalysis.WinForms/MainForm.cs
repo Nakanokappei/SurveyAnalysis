@@ -286,6 +286,7 @@ public sealed class MainForm : Form
         if (_shell.IsProjectOpen)
             AddRow(bottom, Divider());   // set 設定 off from the project actions in the scroll above
         AddRow(bottom, NavButton(Icons.Settings, "設定", OnSettings));
+        AddRow(bottom, NavButton(Icons.Info, "バージョン情報", OnAbout));
 
         // Main navigation fills the space above the bottom actions. It can now grow tall (each 軸 expands
         // into a 質問 sub-menu), so it sits in an AutoScroll host and the stack itself is Top + AutoSize —
@@ -882,6 +883,13 @@ public sealed class MainForm : Form
         using var form = new SettingsForm(viewModel);
         form.ShowDialog(this);
         viewModel.Save();
+    }
+
+    // バージョン情報（モーダル）。アプリ名・バージョン・MIT ライセンスとリポジトリへのリンクを表示。
+    private void OnAbout()
+    {
+        using var form = new AboutForm();
+        form.ShowDialog(this);
     }
 
     // エクスポート → 月次レポート（PDF）を発行。対象月を選び、その月の集計（KPI・感情分布・トピック別件数）を

@@ -1,5 +1,7 @@
 # SurveyAnalysis — Operation Manual
 
+*Read this in other languages: [English](MANUAL-EN.md) · [日本語](MANUAL-JA.md)*
+
 This manual walks through everyday use of the application. The UI is currently
 in Japanese; each step gives the on-screen Japanese label with an English gloss
 in parentheses.
@@ -25,7 +27,8 @@ in parentheses.
 ## 1. Setup
 
 1. Install the [.NET 8 SDK](https://dotnet.microsoft.com/download) on Windows 10/11.
-2. Build and launch the app (see the README's *Build & run* section).
+2. Build and launch the app (see the README's *Build & run* section), or run the
+   standalone `SurveyAnalysis.exe`.
 3. Open **設定 (Settings)** from the bottom of the sidebar and, under the
    **LLM** tab, paste your OpenAI-compatible **API key** and choose the model.
    This is required for the OCR, sentiment, and topic features; CSV import and
@@ -124,6 +127,8 @@ Open **設定 (Settings)** at the bottom of the sidebar:
   reports.
 
 Secrets entered here are encrypted before they are stored (see below).
+**バージョン情報 (About)**, just below Settings, shows the version, the MIT
+license, and a link to the repository.
 
 ## 9. Data storage & privacy
 

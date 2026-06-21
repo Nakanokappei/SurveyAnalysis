@@ -17,6 +17,24 @@
     <Version>1.0.0</Version>
     <Product>アンケート分析</Product>
     <AssemblyTitle>アンケート分析</AssemblyTitle>
+    <Authors>Nakano Kappei</Authors>
+    <Copyright>Copyright (c) 2026 Nakano Kappei</Copyright>
+    <PackageLicenseExpression>MIT</PackageLicenseExpression>
+    <!-- TODO: replace with the real public repository URL once created (also used by the in-app About screen). -->
+    <RepositoryUrl>https://github.com/nakanokappei/SurveyAnalysis</RepositoryUrl>
+  </PropertyGroup>
+
+  <!-- Single-file, self-contained publish: one .exe that runs with no separate DLLs and no installed .NET
+       runtime. Native libraries (e.g. SQLite's e_sqlite3) are extracted on first run. Build with:
+         dotnet publish src\SurveyAnalysis.WinForms\SurveyAnalysis.WinForms.csproj -c Release -r win-x64 -p:PublishSingleFile=true
+       (Plain dotnet build / run are unaffected — these settings only apply when PublishSingleFile is set.) -->
+  <PropertyGroup Condition="'$(PublishSingleFile)' == 'true'">
+    <SelfContained>true</SelfContained>
+    <IncludeNativeLibrariesForSelfExtract>true</IncludeNativeLibrariesForSelfExtract>
+    <EnableCompressionInSingleFile>true</EnableCompressionInSingleFile>
+    <DebugType>embedded</DebugType>
+    <!-- Keep the publish folder to just the single .exe (don't copy referenced projects' .pdb / .xml). -->
+    <AllowedReferenceRelatedFileExtensions>none</AllowedReferenceRelatedFileExtensions>
   </PropertyGroup>
 
   <!-- UseWindowsForms requires the Windows Desktop SDK (not on macOS); reference the framework
