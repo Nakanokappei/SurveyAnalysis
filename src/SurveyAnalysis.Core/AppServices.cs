@@ -16,13 +16,18 @@ public static class AppServices
 {
     private static readonly AppDatabase Database = CreateDatabase();
 
+    // Transparent PII protection: the per-DB data key (DPAPI-wrapped). Injected into the repositories that
+    // touch PII so encryption is handled at the storage layer and stays invisible to upper layers. Locked
+    // (PII shows 🔒) if the database was opened by another Windows user / on another machine.
+    public static readonly IDataProtector Protector = DataKeyStore.Load(Database);
+
     public static readonly ProjectRepository Projects = new(Database);
     public static readonly SettingsRepository Settings = new(Database);
-    public static readonly ResponseRepository Responses = new(Database);
-    public static readonly AnalyticsRepository Analytics = new(Database);
+    public static readonly ResponseRepository Responses = new(Database, Protector);
+    public static readonly AnalyticsRepository Analytics = new(Database, Protector);
     public static readonly TopicRepository Topics = new(Database);
     public static readonly AnalysisResultsRepository AnalysisResults = new(Database);
-    public static readonly ImageStagingRepository ImageStaging = new(Database);
+    public static readonly ImageStagingRepository ImageStaging = new(Database, Protector);
 
     // Backup / optimize / restore for the database file (driven from the settings dialog and on close).
     public static readonly DatabaseMaintenance Maintenance = new(Database.DatabaseFilePath);

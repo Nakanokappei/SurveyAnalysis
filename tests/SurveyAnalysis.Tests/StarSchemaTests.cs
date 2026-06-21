@@ -126,10 +126,10 @@ public class StarSchemaTests
         Assert.Equal(2, table.Rows[0].Count);
         Assert.Equal(1, table.Rows.Single(r => r.Label == "大阪府").Count);
 
-        // The ETL stored the parsed 市区町村 alongside each full address.
+        // The ETL stored the parsed 市区町村 (the full address itself is not kept in the star — only its hash).
         using var connection = temp.Db.Open();
         using var command = connection.CreateCommand();
-        command.CommandText = "SELECT city FROM dim_region WHERE label = '東京都新宿区西新宿1-1';";
-        Assert.Equal("新宿区", (string)command.ExecuteScalar()!);
+        command.CommandText = "SELECT COUNT(*) FROM dim_region WHERE city = '新宿区';";
+        Assert.Equal(1L, (long)command.ExecuteScalar()!);
     }
 }

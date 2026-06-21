@@ -15,8 +15,16 @@ namespace SurveyAnalysis.Data;
 public sealed class ResponseRepository
 {
     private readonly AppDatabase _db;
+    // Encrypts PII answer values on write and decrypts every value on read (non-PII plaintext passes
+    // through). Defaults to a no-op so existing callers / tests are unaffected; AppServices injects the
+    // real (DPAPI-backed) protector.
+    private readonly IDataProtector _protector;
 
-    public ResponseRepository(AppDatabase db) => _db = db;
+    public ResponseRepository(AppDatabase db, IDataProtector? protector = null)
+    {
+        _db = db;
+        _protector = protector ?? IdentityDataProtector.Instance;
+    }
 
     // Persists imported responses (each with its answers) for a project in one transaction.
     public void InsertResponses(long projectId, string source, IReadOnlyList<SurveyResponse> responses)
@@ -25,8 +33,8 @@ public sealed class ResponseRepository
         using var transaction = connection.BeginTransaction();
         var now = DateTime.UtcNow.ToString("o");
 
-        // Map the project's field names to their ids once; answers carry the name and resolve through it.
-        var fieldIdByName = LoadFieldIds(connection, transaction, projectId);
+        // Map the project's field names to (id, is-PII) once; answers carry the name and resolve through it.
+        var fieldsByName = LoadFields(connection, transaction, projectId);
 
         foreach (var response in responses)
         {
@@ -47,14 +55,16 @@ public sealed class ResponseRepository
             foreach (var answer in response.Answers)
             {
                 // An answer for a name with no matching project field is skipped (e.g. a dropped field).
-                if (!fieldIdByName.TryGetValue(answer.FieldName, out var fieldId))
+                if (!fieldsByName.TryGetValue(answer.FieldName, out var field))
                     continue;
+                // PII field values are encrypted at rest; everything else stays as-is (greppable / usable).
+                var value = field.IsPii ? _protector.Encode(answer.Value) : answer.Value;
                 using var insertAnswer = connection.CreateCommand();
                 insertAnswer.Transaction = transaction;
                 insertAnswer.CommandText = "INSERT INTO answers (response_id, field_id, value) VALUES ($rid, $fid, $value);";
                 insertAnswer.Parameters.AddWithValue("$rid", responseId);
-                insertAnswer.Parameters.AddWithValue("$fid", fieldId);
-                insertAnswer.Parameters.AddWithValue("$value", answer.Value);
+                insertAnswer.Parameters.AddWithValue("$fid", field.Id);
+                insertAnswer.Parameters.AddWithValue("$value", value);
                 insertAnswer.ExecuteNonQuery();
             }
         }
@@ -62,17 +72,21 @@ public sealed class ResponseRepository
         transaction.Commit();
     }
 
-    // The project's field name → id map (last wins if names collide). Used to resolve imported answers.
-    private static Dictionary<string, long> LoadFieldIds(SqliteConnection connection, SqliteTransaction transaction, long projectId)
+    // The project's field name → (id, is-PII) map (last wins if names collide). Used to resolve imported
+    // answers to their field id and decide which values to encrypt at rest.
+    private static Dictionary<string, (long Id, bool IsPii)> LoadFields(SqliteConnection connection, SqliteTransaction transaction, long projectId)
     {
         using var command = connection.CreateCommand();
         command.Transaction = transaction;
-        command.CommandText = "SELECT name, id FROM fields WHERE project_id = $pid;";
+        command.CommandText = "SELECT name, id, field_type FROM fields WHERE project_id = $pid;";
         command.Parameters.AddWithValue("$pid", projectId);
-        var map = new Dictionary<string, long>();
+        var map = new Dictionary<string, (long, bool)>();
         using var reader = command.ExecuteReader();
         while (reader.Read())
-            map[reader.GetString(0)] = reader.GetInt64(1);
+        {
+            var type = FieldTypeInfo.ParseStored(reader.GetString(2));
+            map[reader.GetString(0)] = (reader.GetInt64(1), FieldTypeInfo.IsPersonalInformation(type));
+        }
         return map;
     }
 
@@ -107,7 +121,7 @@ public sealed class ResponseRepository
             }
             // LEFT JOIN: a response with no answers yields a null field_name — keep its empty map.
             if (!reader.IsDBNull(1))
-                values[reader.GetString(1)] = reader.IsDBNull(2) ? "" : reader.GetString(2);
+                values[reader.GetString(1)] = reader.IsDBNull(2) ? "" : _protector.Decode(reader.GetString(2));
         }
 
         var result = new List<IReadOnlyDictionary<string, string>>(order.Count);
@@ -145,7 +159,7 @@ public sealed class ResponseRepository
                 order.Add(responseId);
             }
             if (!reader.IsDBNull(1))
-                values[reader.GetString(1)] = reader.IsDBNull(2) ? "" : reader.GetString(2);
+                values[reader.GetString(1)] = reader.IsDBNull(2) ? "" : _protector.Decode(reader.GetString(2));
         }
 
         return order.Select(id => (id, (IReadOnlyDictionary<string, string>)byResponse[id])).ToList();
@@ -168,7 +182,7 @@ public sealed class ResponseRepository
         var values = new List<string>();
         using var reader = command.ExecuteReader();
         while (reader.Read())
-            values.Add(reader.GetString(0));
+            values.Add(_protector.Decode(reader.GetString(0)));
         return values;
     }
 
@@ -190,7 +204,7 @@ public sealed class ResponseRepository
         var options = new List<string>();
         using var reader = command.ExecuteReader();
         while (reader.Read())
-            foreach (var option in ChoiceValues.Split(reader.GetString(0)))
+            foreach (var option in ChoiceValues.Split(_protector.Decode(reader.GetString(0))))
                 if (!options.Contains(option))
                     options.Add(option);
         return options;

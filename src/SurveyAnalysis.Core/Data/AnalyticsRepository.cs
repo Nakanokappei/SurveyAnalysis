@@ -29,8 +29,16 @@ public sealed record SentimentTrendPoint(string AxisLabel, string Label, double 
 public sealed class AnalyticsRepository
 {
     private readonly AppDatabase _db;
+    // Decrypts PII answer values as they are read (non-PII plaintext passes through). The ETL reads PII
+    // (e.g. address → region) and the 個票 read answer values, so every answer materialization goes through
+    // it. Defaults to a no-op so existing callers / tests are unaffected; AppServices injects the real one.
+    private readonly IDataProtector _protector;
 
-    public AnalyticsRepository(AppDatabase db) => _db = db;
+    public AnalyticsRepository(AppDatabase db, IDataProtector? protector = null)
+    {
+        _db = db;
+        _protector = protector ?? IdentityDataProtector.Instance;
+    }
 
     // ===== Field-role mapping: which project field feeds each dimension =====
 
@@ -320,7 +328,8 @@ public sealed class AnalyticsRepository
 
     // Reads an analysis 個票 query (r.id, sscore, sneg, topic, fname, val) into one ResponseAnalysis per
     // response, in row order: the first row fixes its (constant) analysis, the rest accumulate answers.
-    private static IReadOnlyList<ResponseAnalysis> ReadAnalysisMaps(SqliteCommand command)
+    // PII answer values are decrypted here.
+    private IReadOnlyList<ResponseAnalysis> ReadAnalysisMaps(SqliteCommand command)
     {
         var values = new Dictionary<long, Dictionary<string, string>>();
         var analysis = new Dictionary<long, (double? Score, bool IsNegative, string? Topic)>();
@@ -339,7 +348,7 @@ public sealed class AnalyticsRepository
                 order.Add(id);
             }
             if (!reader.IsDBNull(4))
-                map[reader.GetString(4)] = reader.IsDBNull(5) ? "" : reader.GetString(5);
+                map[reader.GetString(4)] = reader.IsDBNull(5) ? "" : _protector.Decode(reader.GetString(5));
         }
         return order
             .Select(id => new ResponseAnalysis(values[id], analysis[id].Score, analysis[id].IsNegative, analysis[id].Topic))
@@ -522,8 +531,8 @@ public sealed class AnalyticsRepository
     }
 
     // Reads a response query (r.id, field_name, value) into one field-name→value map per response,
-    // in row order. A response with no answers (LEFT JOIN null) keeps an empty map.
-    private static IReadOnlyList<IReadOnlyDictionary<string, string>> ReadResponseMaps(SqliteCommand command)
+    // in row order. A response with no answers (LEFT JOIN null) keeps an empty map. PII values are decrypted.
+    private IReadOnlyList<IReadOnlyDictionary<string, string>> ReadResponseMaps(SqliteCommand command)
     {
         var byId = new Dictionary<long, Dictionary<string, string>>();
         var order = new List<long>();
@@ -538,7 +547,7 @@ public sealed class AnalyticsRepository
                 order.Add(id);
             }
             if (!reader.IsDBNull(1))
-                values[reader.GetString(1)] = reader.IsDBNull(2) ? "" : reader.GetString(2);
+                values[reader.GetString(1)] = reader.IsDBNull(2) ? "" : _protector.Decode(reader.GetString(2));
         }
         return order.Select(id => (IReadOnlyDictionary<string, string>)byId[id]).ToList();
     }
@@ -653,7 +662,7 @@ public sealed class AnalyticsRepository
                 if (!reader.IsDBNull(fnameOrdinal))
                 {
                     var field = reader.GetString(fnameOrdinal);
-                    var value = reader.IsDBNull(reader.GetOrdinal("val")) ? "" : reader.GetString(reader.GetOrdinal("val"));
+                    var value = reader.IsDBNull(reader.GetOrdinal("val")) ? "" : _protector.Decode(reader.GetString(reader.GetOrdinal("val")));
                     group.AddAnswer(field, value);
                     grand.AddAnswer(field, value);
                 }
@@ -962,8 +971,8 @@ public sealed class AnalyticsRepository
 
     // ===== Helpers =====
 
-    // Reads a project's responses as (response id, field-name→value map).
-    private static List<(long Id, Dictionary<string, string> Values)> ReadResponses(
+    // Reads a project's responses as (response id, field-name→value map). PII values are decrypted here.
+    private List<(long Id, Dictionary<string, string> Values)> ReadResponses(
         SqliteConnection connection, SqliteTransaction transaction, long projectId)
     {
         using var command = connection.CreateCommand();
@@ -991,7 +1000,7 @@ public sealed class AnalyticsRepository
                 order.Add(id);
             }
             if (!reader.IsDBNull(1))
-                values[reader.GetString(1)] = reader.IsDBNull(2) ? "" : reader.GetString(2);
+                values[reader.GetString(1)] = reader.IsDBNull(2) ? "" : _protector.Decode(reader.GetString(2));
         }
         return order.Select(id => (id, byId[id])).ToList();
     }
@@ -1047,22 +1056,29 @@ public sealed class AnalyticsRepository
         return key;
     }
 
-    // dim_region is keyed by a surrogate id, deduped by its (unique) full-address label. The 都道府県 /
-    // 市区町村 split is parsed once and stored so region queries can group by either level.
-    private static long GetOrCreateRegion(SqliteConnection connection, SqliteTransaction transaction, string label)
+    // dim_region is keyed by a surrogate id, deduped by a hash of the full address (the address itself is
+    // PII and is not stored in the star). The 都道府県 / 市区町村 split is parsed once and stored so region
+    // queries can group by either level (both are non-PII granularity by policy).
+    private static long GetOrCreateRegion(SqliteConnection connection, SqliteTransaction transaction, string address)
     {
-        var (prefecture, city) = AddressParser.Parse(label);
+        var (prefecture, city) = AddressParser.Parse(address);
+        var hash = Sha256Hex(address);
         using var insert = connection.CreateCommand();
         insert.Transaction = transaction;
         insert.CommandText = """
-            INSERT OR IGNORE INTO dim_region (label, prefecture, city) VALUES ($label, $pref, $city);
-            SELECT region_key FROM dim_region WHERE label = $label;
+            INSERT OR IGNORE INTO dim_region (address_hash, prefecture, city) VALUES ($hash, $pref, $city);
+            SELECT region_key FROM dim_region WHERE address_hash = $hash;
             """;
-        insert.Parameters.AddWithValue("$label", label);
+        insert.Parameters.AddWithValue("$hash", hash);
         insert.Parameters.AddWithValue("$pref", prefecture);
         insert.Parameters.AddWithValue("$city", city);
         return (long)insert.ExecuteScalar()!;
     }
+
+    // SHA-256 hex of a string — the dedup key for an address, so identical addresses collapse to one region
+    // without the plaintext address being stored.
+    private static string Sha256Hex(string value) =>
+        Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(value)));
 
     // dim_choice is keyed by a surrogate id, deduped by (field_id, value) so the same text under two
     // different choice fields stays distinct.

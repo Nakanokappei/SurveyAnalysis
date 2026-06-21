@@ -303,12 +303,14 @@ public sealed class AppDatabase
             fiscal_quarter_label  TEXT NOT NULL           -- 2026年度 Q1
         );
 
-        -- Region keyed by the full captured address (UNIQUE), with the parsed 都道府県 / 市区町村 split.
+        -- Region deduped by a hash of the captured address (the full address is PII and must not sit in the
+        -- star in plaintext), with the parsed 都道府県 / 市区町村 split — both coarse-grained and non-PII by
+        -- policy, so they are kept for the region queries which group by them.
         CREATE TABLE dim_region (
-            region_key  INTEGER PRIMARY KEY AUTOINCREMENT,
-            label       TEXT NOT NULL UNIQUE,   -- the address as captured
-            prefecture  TEXT NOT NULL,          -- 都道府県 (（不明） if unparseable)
-            city        TEXT NOT NULL           -- 市区町村 ('' if absent)
+            region_key    INTEGER PRIMARY KEY AUTOINCREMENT,
+            address_hash  TEXT NOT NULL UNIQUE,   -- SHA-256 of the captured address (dedup key, not PII)
+            prefecture    TEXT NOT NULL,          -- 都道府県 (（不明） if unparseable)
+            city          TEXT NOT NULL           -- 市区町村 ('' if absent)
         );
 
         -- One topic per (自由記述 field, label), projected from the field_topics dictionary. Scoped to a

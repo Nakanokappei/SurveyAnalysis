@@ -57,7 +57,12 @@ public sealed class OpenAiCompatibleClient : ILlmClient
         var key = HashKey.ForChat(_chat.NormalizedEndpoint, request.Model, request.Messages,
             request.Temperature, request.MaxTokens, request.ResponseFormat, request.Seed);
 
-        if (_options.CacheEnabled && _cache.TryGetChat(key, out var cached) && cached is not null)
+        // Vision (image) requests are OCR: their reply transcribes the form, so it can carry PII. Such
+        // replies are never cached (and the image is near-unique, so a hit is unlikely anyway), keeping PII
+        // out of the cache file. Every other chat reply caches normally.
+        var hasImages = request.Messages.Any(m => m.ImageDataUrls is { Count: > 0 });
+
+        if (_options.CacheEnabled && !hasImages && _cache.TryGetChat(key, out var cached) && cached is not null)
             return cached;
 
         var wire = new ChatRequestWire
@@ -91,7 +96,7 @@ public sealed class OpenAiCompatibleClient : ILlmClient
         var result = new ChatResult(content, response.Model ?? request.Model,
             response.Usage?.PromptTokens, response.Usage?.CompletionTokens, FromCache: false);
 
-        if (_options.CacheEnabled)
+        if (_options.CacheEnabled && !hasImages)
             _cache.PutChat(key, _chat.Label, request.Model, result);
         return result;
     }

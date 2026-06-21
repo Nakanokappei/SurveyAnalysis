@@ -21,8 +21,17 @@ public sealed record StagedImage(
 public sealed class ImageStagingRepository
 {
     private readonly AppDatabase _db;
+    // The OCR'd values often contain PII (names/addresses/phones read off the form), so the values JSON is
+    // encrypted at rest as a whole. Defaults to a no-op so tests are unaffected; AppServices injects the real
+    // protector. The image bytes are not encrypted (a scanned form is the user's own document, kept only
+    // until the review confirms / discards it).
+    private readonly IDataProtector _protector;
 
-    public ImageStagingRepository(AppDatabase db) => _db = db;
+    public ImageStagingRepository(AppDatabase db, IDataProtector? protector = null)
+    {
+        _db = db;
+        _protector = protector ?? IdentityDataProtector.Instance;
+    }
 
     // Stages one OCR'd image; returns its new staging-row id.
     public long Add(long projectId, string sourceName, string mediaType, byte[] imageBytes, IReadOnlyDictionary<string, string> values)
@@ -38,7 +47,7 @@ public sealed class ImageStagingRepository
         command.Parameters.AddWithValue("$name", sourceName);
         command.Parameters.AddWithValue("$mt", mediaType);
         command.Parameters.AddWithValue("$bytes", imageBytes);
-        command.Parameters.AddWithValue("$vals", JsonSerializer.Serialize(values));
+        command.Parameters.AddWithValue("$vals", _protector.Encode(JsonSerializer.Serialize(values)));
         command.Parameters.AddWithValue("$now", DateTime.UtcNow.ToString("o"));
         return (long)command.ExecuteScalar()!;
     }
@@ -61,7 +70,7 @@ public sealed class ImageStagingRepository
         using var reader = command.ExecuteReader();
         while (reader.Read())
         {
-            var values = Deserialize(reader.GetString(4));
+            var values = Deserialize(_protector.Decode(reader.GetString(4)));
             list.Add(new StagedImage(reader.GetInt64(0), reader.GetString(1), reader.GetString(2), (byte[])reader.GetValue(3), values));
         }
         return list;
