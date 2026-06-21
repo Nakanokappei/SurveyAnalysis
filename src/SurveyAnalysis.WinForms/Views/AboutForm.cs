@@ -13,7 +13,7 @@ internal sealed class AboutForm : Form
 {
     // The public repository, in one place so the link and the docs stay in step.
     // TODO: replace with the real URL once the public repository is created.
-    public const string RepositoryUrl = "https://github.com/nakanokappei/SurveyAnalysis";
+    public const string RepositoryUrl = "https://github.com/Nakanokappei/SurveyAnalysis";
 
     public AboutForm()
     {

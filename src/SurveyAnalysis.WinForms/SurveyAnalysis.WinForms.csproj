@@ -21,7 +21,7 @@
     <Copyright>Copyright (c) 2026 Nakano Kappei</Copyright>
     <PackageLicenseExpression>MIT</PackageLicenseExpression>
     <!-- TODO: replace with the real public repository URL once created (also used by the in-app About screen). -->
-    <RepositoryUrl>https://github.com/nakanokappei/SurveyAnalysis</RepositoryUrl>
+    <RepositoryUrl>https://github.com/Nakanokappei/SurveyAnalysis</RepositoryUrl>
   </PropertyGroup>
 
   <!-- Single-file, self-contained publish: one .exe that runs with no separate DLLs and no installed .NET
