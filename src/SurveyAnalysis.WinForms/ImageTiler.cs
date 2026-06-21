@@ -9,15 +9,17 @@ using System.Runtime.InteropServices;
 namespace SurveyAnalysis.WinForms;
 
 // Prepares a scanned survey form for OCR by spending the vision model's fixed resolution budget on marks
-// instead of blank paper, in three steps. (1) CropToContent trims the blank outer margin. (2) CompressVertically
-// removes the blank bands *between* filled rows, packing the content so a whole-page read sees each row larger
+// instead of blank paper, in four steps. (1) CropToContent trims the blank outer margin. (2) CompressVertically
+// removes the blank/rule bands *between* rows, packing the content so a whole-page read sees each row larger
 // (forms are read top-to-bottom, so whole rows are the safe unit — a checkbox and its label stay together).
-// (3) The compacted page is split into overlapping horizontal bands only as far as needed: a band taller than
-// TargetBandHeightPx reads at too low a DPI, so the page is divided into just enough bands to bring each under
-// that height (capped at MaxBands for cost). After compression most forms need far fewer bands — often a single
-// whole-page read. Each band is greyscaled + contrast-stretched to make light ticks stand out, and the bands
-// overlap so a choice group straddling a cut still appears whole in at least one; the per-band OCR results are
-// merged back by OcrExtractor.MergeValues. Best-effort: any failure returns the single whole image so OCR runs.
+// (3) CompressHorizontally does the same across columns (usually a smaller win, since full-width headers/rules
+// keep most interior gutters non-blank, but a genuinely empty side band still packs in). (4) The compacted page
+// is split into overlapping horizontal bands only as far as needed: a band taller than TargetBandHeightPx reads
+// at too low a DPI, so the page is divided into just enough bands to bring each under that height (capped at
+// MaxBands for cost). After compression most forms need far fewer bands — often a single whole-page read. Each
+// band is greyscaled + contrast-stretched to make light ticks stand out, and the bands overlap so a choice group
+// straddling a cut still appears whole in at least one; the per-band OCR results are merged back by
+// OcrExtractor.MergeValues. Best-effort: any failure returns the single whole image so OCR still runs.
 internal static class ImageTiler
 {
     private const double DefaultOverlap = 0.35;   // each band is 35% taller than an equal split → overlap
@@ -36,10 +38,11 @@ internal static class ImageTiler
         {
             using var input = new MemoryStream(bytes);
             using var decoded = new Bitmap(input);
-            // Trim the blank outer margin, then collapse the blank bands between filled rows. Both free vertical
-            // resolution for the actual marks; the band sizing below then works on the compacted page.
+            // Trim the blank outer margin, then collapse the blank/rule bands between rows and between columns. All
+            // three free resolution for the actual marks; the band sizing below then works on the compacted page.
             using var cropped = CropToContent(decoded);
-            using var src = CompressVertically(cropped);
+            using var compacted = CompressVertically(cropped);
+            using var src = CompressHorizontally(compacted);
 
             // Split only as far as needed: just enough overlapping bands to bring each under TargetBandHeightPx,
             // capped for cost. After compression a normal form is often short enough to read whole (one band).
@@ -161,99 +164,123 @@ internal static class ImageTiler
         }
     }
 
-    // Removes the horizontal bands that carry no OCR value so the content packs together and a whole-page read sees
-    // each row larger. Forms are read top-to-bottom (横書き), so whole rows are the unit. Three kinds of row: a
-    // *blank* row (< SignalPercent ink) is empty paper; a *rule* row is ink right across the width (≥ SolidPercent)
-    // AND part of a thin run — a separator line or box border a human reads but OCR does not; a *content* row is
-    // anything else. The thinness test is what protects shaded / reverse-video section headers: a header is also
-    // inked across the width, but its run is thick (a band, not a line), so it stays content and is kept — only a
-    // hairline rule is dropped. Rows are grouped into n-row blocks (n = source rows per model pixel,
-    // width / TargetResolution — finer than that the model cannot resolve). Rule/blank-only blocks are dropped,
-    // except one blank block is kept on each side of every content region as a small gap + quiet zone, so packed
-    // rows do not merge and an edge mark is never sliced. Returns a full-frame copy when nothing is removable.
+    // Removes the blank/rule bands *between* rows so the content packs together top-to-bottom and a whole-page read
+    // sees each row larger. Forms are read row by row (横書き), so whole rows are the unit; KeptSegments decides which
+    // rows survive (content rows, plus a thin gap of empty rows, with blank interiors and rule lines dropped) and
+    // Rebuild stacks them. Returns a full-frame copy when nothing is removable.
     private static Bitmap CompressVertically(Bitmap src)
     {
-        var width = src.Width;
-        var height = src.Height;
         ScanInk(src, out var rowInk, out _);
+        var n = Math.Max(1, src.Width / TargetResolution);
+        var segments = KeptSegments(rowInk, src.Height, src.Width, n);
+        return Rebuild(src, segments, vertical: true);
+    }
 
-        // Find rule rows: full-width-inked rows (≥ SolidPercent) that belong to a thin run. A thick run of inked
-        // rows is a filled band (a shaded/reverse-video header), not a line, so it is left as content.
-        var solidRowMin = SolidPercent * width;
-        var maxRuleThickness = Math.Max(2, height / RuleThicknessDivisor);
-        var isRule = new bool[height];
-        for (var y = 0; y < height;)
+    // The same compaction applied across columns: removes blank vertical bands and full-height vertical rules so
+    // content packs left-to-right. Its effect is usually small — an interior gutter is only removed when it is blank
+    // over the *entire* page height, which full-width titles/headers/rules normally prevent (so two-column option
+    // groups are not merged) — but a form with a genuinely empty side band still benefits. Returns a full-frame copy
+    // when nothing is removable.
+    private static Bitmap CompressHorizontally(Bitmap src)
+    {
+        ScanInk(src, out _, out var colInk);
+        var n = Math.Max(1, src.Width / TargetResolution);
+        var segments = KeptSegments(colInk, src.Width, src.Height, n);
+        return Rebuild(src, segments, vertical: false);
+    }
+
+    // Axis-agnostic core of the two compaction passes. lineInk is the ink count per line along the compaction axis
+    // (rows for vertical, columns for horizontal); lineCount is the axis length; perpDim is each line's full length
+    // (so SignalPercent/SolidPercent read as fractions of it); n is how many source lines collapse into one model
+    // pixel. Classifies each line as blank (< SignalPercent), rule (≥ SolidPercent in a thin run — a separator a
+    // human reads but OCR does not; a *thick* inked run is a filled band such as a shaded header and stays content),
+    // or content. Returns the source-line segments worth keeping: every content block, plus one empty block of gap +
+    // quiet zone on each side of a content region; rule blocks and blank interiors are dropped.
+    private static List<(int Start, int Length)> KeptSegments(int[] lineInk, int lineCount, int perpDim, int n)
+    {
+        // Rule lines: fully-inked lines (≥ SolidPercent) belonging to a thin run; a thick run is a filled band.
+        var solidMin = SolidPercent * perpDim;
+        var maxRuleThickness = Math.Max(2, lineCount / RuleThicknessDivisor);
+        var isRule = new bool[lineCount];
+        for (var i = 0; i < lineCount;)
         {
-            if (rowInk[y] < solidRowMin) { y++; continue; }
-            var start = y;
-            while (y < height && rowInk[y] >= solidRowMin) y++;
-            if (y - start <= maxRuleThickness)
-                for (var r = start; r < y; r++)
+            if (lineInk[i] < solidMin) { i++; continue; }
+            var start = i;
+            while (i < lineCount && lineInk[i] >= solidMin) i++;
+            if (i - start <= maxRuleThickness)
+                for (var r = start; r < i; r++)
                     isRule[r] = true;
         }
 
-        // n: source rows per model pixel — the unit-line. Below this granularity the model averages rows together,
-        // so there is no point deciding keep/drop more finely.
-        var n = Math.Max(1, width / TargetResolution);
-        var blockCount = (height + n - 1) / n;
-
-        // Classify each n-row block: content (any inked, non-rule row), empty (only blank paper), or rule (rule
-        // lines + blank, no content). Only empty blocks may be kept as a gap; rule blocks are always dropped.
-        var blankRowMax = SignalPercent * width;
+        // Classify each n-line block: content (any inked, non-rule line), empty (only blank), or rule (rule lines +
+        // blank, no content). Only empty blocks may be kept as a gap; rule blocks are always dropped.
+        var blankMax = SignalPercent * perpDim;
+        var blockCount = (lineCount + n - 1) / n;
         var content = new bool[blockCount];
         var empty = new bool[blockCount];
         for (var b = 0; b < blockCount; b++)
         {
-            var topRow = b * n;
-            var rows = Math.Min(n, height - topRow);
+            var first = b * n;
+            var lines = Math.Min(n, lineCount - first);
             bool hasContent = false, hasRule = false;
-            for (var y = topRow; y < topRow + rows; y++)
+            for (var i = first; i < first + lines; i++)
             {
-                if (isRule[y]) hasRule = true;
-                else if (rowInk[y] >= blankRowMax) hasContent = true;
+                if (isRule[i]) hasRule = true;
+                else if (lineInk[i] >= blankMax) hasContent = true;
             }
             content[b] = hasContent;
-            empty[b] = !hasContent && !hasRule;   // pure blank paper (a rule-bearing block is neither → dropped)
+            empty[b] = !hasContent && !hasRule;
         }
 
-        // Keep every content block. Keep an empty block only where it touches content — one gap + quiet zone on
-        // each side of a content region — and drop the interior of blank runs and every rule/border block.
+        // Keep content blocks, plus an empty block wherever it touches content (one gap + quiet zone each side).
         var keep = new bool[blockCount];
         for (var b = 0; b < blockCount; b++)
             keep[b] = content[b]
                    || (empty[b] && ((b > 0 && content[b - 1]) || (b < blockCount - 1 && content[b + 1])));
 
-        // Gather the kept blocks into contiguous source-row segments.
-        var segments = new List<(int Top, int Height)>();
+        // Gather kept blocks into contiguous source-line segments.
+        var segments = new List<(int Start, int Length)>();
         for (var b = 0; b < blockCount;)
         {
             if (!keep[b]) { b++; continue; }
             var start = b;
             while (b < blockCount && keep[b]) b++;
-            var top = start * n;
-            segments.Add((top, Math.Min(height, b * n) - top));
+            var first = start * n;
+            segments.Add((first, Math.Min(lineCount, b * n) - first));
         }
+        return segments;
+    }
 
-        var outHeight = 0;
+    // Stacks the kept segments back into a bitmap — vertically (row segments) or horizontally (column segments).
+    // Nearest-neighbour + half-pixel offset keeps the 1:1 copy crisp (no blur on thin marks). Returns a full-frame
+    // copy when the segments already span the whole axis (nothing removed), so the caller can dispose uniformly.
+    private static Bitmap Rebuild(Bitmap src, List<(int Start, int Length)> segments, bool vertical)
+    {
+        var kept = 0;
         foreach (var s in segments)
-            outHeight += s.Height;
-
-        // Nothing to gain (no blank removed, or the whole page is blank) → full-frame copy.
-        if (segments.Count == 0 || outHeight >= height)
+            kept += s.Length;
+        var axisLength = vertical ? src.Height : src.Width;
+        if (segments.Count == 0 || kept >= axisLength)
             return (Bitmap)src.Clone();
 
-        // Stack the kept segments. Nearest-neighbour + half-pixel offset keeps the 1:1 copy crisp (no blur on
-        // thin marks).
-        var outBmp = new Bitmap(width, outHeight, PixelFormat.Format32bppArgb);
+        var outBmp = vertical
+            ? new Bitmap(src.Width, kept, PixelFormat.Format32bppArgb)
+            : new Bitmap(kept, src.Height, PixelFormat.Format32bppArgb);
         using (var graphics = Graphics.FromImage(outBmp))
         {
             graphics.InterpolationMode = InterpolationMode.NearestNeighbor;
             graphics.PixelOffsetMode = PixelOffsetMode.Half;
-            var destY = 0;
-            foreach (var (top, segHeight) in segments)
+            var dest = 0;
+            foreach (var (start, length) in segments)
             {
-                graphics.DrawImage(src, new Rectangle(0, destY, width, segHeight), new Rectangle(0, top, width, segHeight), GraphicsUnit.Pixel);
-                destY += segHeight;
+                var srcRect = vertical
+                    ? new Rectangle(0, start, src.Width, length)
+                    : new Rectangle(start, 0, length, src.Height);
+                var destRect = vertical
+                    ? new Rectangle(0, dest, src.Width, length)
+                    : new Rectangle(dest, 0, length, src.Height);
+                graphics.DrawImage(src, destRect, srcRect, GraphicsUnit.Pixel);
+                dest += length;
             }
         }
         return outBmp;
