@@ -26,7 +26,9 @@ internal static class ImageTiler
     private const int TargetResolution = 512;     // the cheap vision model's working square; sets the n-row decision granularity
     private const int TargetBandHeightPx = 600;   // a band taller than this reads at too low a DPI → split the page further
     private const int MaxBands = 4;               // cap on per-image OCR calls (cost ceiling)
-    private const float SignalPercent = 0.01f;    // a unit-line with < 1% ink is blank (the same 1% as the margin trim)
+    private const float SignalPercent = 0.01f;    // a row with < 1% ink is blank paper
+    private const float SolidPercent = 0.90f;     // a row with ≥ this much ink is "filled" right across the width
+    private const int RuleThicknessDivisor = 200; // a filled run thinner than height/this is a rule line; thicker is a filled band (kept)
 
     public static IReadOnlyList<(byte[] Bytes, string MediaType)> ToBands(byte[] bytes, string mediaType, double overlap = DefaultOverlap)
     {
@@ -159,50 +161,67 @@ internal static class ImageTiler
         }
     }
 
-    // Removes the blank horizontal bands *inside* the form — the vertical whitespace between filled rows — so the
-    // content packs together and a whole-page read sees each row larger. Forms are read top-to-bottom (横書き), so
-    // whole rows are the unit: a row band is kept when ≥ SignalPercent of it is ink and dropped when effectively
-    // blank. Decisions are quantized to n-row blocks, where n is how many source rows collapse into one model pixel
-    // (width / TargetResolution) — finer than that the model cannot resolve. Each blank run is collapsed to at most
-    // one block on each side, which keeps a small gap so packed rows do not merge *and* leaves a quiet zone so a
-    // faint mark at a content edge is never sliced. Returns a full-frame copy when nothing is blank, so the caller
-    // can dispose the result uniformly.
+    // Removes the horizontal bands that carry no OCR value so the content packs together and a whole-page read sees
+    // each row larger. Forms are read top-to-bottom (横書き), so whole rows are the unit. Three kinds of row: a
+    // *blank* row (< SignalPercent ink) is empty paper; a *rule* row is ink right across the width (≥ SolidPercent)
+    // AND part of a thin run — a separator line or box border a human reads but OCR does not; a *content* row is
+    // anything else. The thinness test is what protects shaded / reverse-video section headers: a header is also
+    // inked across the width, but its run is thick (a band, not a line), so it stays content and is kept — only a
+    // hairline rule is dropped. Rows are grouped into n-row blocks (n = source rows per model pixel,
+    // width / TargetResolution — finer than that the model cannot resolve). Rule/blank-only blocks are dropped,
+    // except one blank block is kept on each side of every content region as a small gap + quiet zone, so packed
+    // rows do not merge and an edge mark is never sliced. Returns a full-frame copy when nothing is removable.
     private static Bitmap CompressVertically(Bitmap src)
     {
         var width = src.Width;
         var height = src.Height;
         ScanInk(src, out var rowInk, out _);
 
+        // Find rule rows: full-width-inked rows (≥ SolidPercent) that belong to a thin run. A thick run of inked
+        // rows is a filled band (a shaded/reverse-video header), not a line, so it is left as content.
+        var solidRowMin = SolidPercent * width;
+        var maxRuleThickness = Math.Max(2, height / RuleThicknessDivisor);
+        var isRule = new bool[height];
+        for (var y = 0; y < height;)
+        {
+            if (rowInk[y] < solidRowMin) { y++; continue; }
+            var start = y;
+            while (y < height && rowInk[y] >= solidRowMin) y++;
+            if (y - start <= maxRuleThickness)
+                for (var r = start; r < y; r++)
+                    isRule[r] = true;
+        }
+
         // n: source rows per model pixel — the unit-line. Below this granularity the model averages rows together,
         // so there is no point deciding keep/drop more finely.
         var n = Math.Max(1, width / TargetResolution);
         var blockCount = (height + n - 1) / n;
 
-        // Mark each n-row block blank (ink below SignalPercent of its pixels) or content.
-        var blank = new bool[blockCount];
+        // Classify each n-row block: content (any inked, non-rule row), empty (only blank paper), or rule (rule
+        // lines + blank, no content). Only empty blocks may be kept as a gap; rule blocks are always dropped.
+        var blankRowMax = SignalPercent * width;
+        var content = new bool[blockCount];
+        var empty = new bool[blockCount];
         for (var b = 0; b < blockCount; b++)
         {
             var topRow = b * n;
             var rows = Math.Min(n, height - topRow);
-            var ink = 0;
+            bool hasContent = false, hasRule = false;
             for (var y = topRow; y < topRow + rows; y++)
-                ink += rowInk[y];
-            blank[b] = ink < SignalPercent * rows * width;
+            {
+                if (isRule[y]) hasRule = true;
+                else if (rowInk[y] >= blankRowMax) hasContent = true;
+            }
+            content[b] = hasContent;
+            empty[b] = !hasContent && !hasRule;   // pure blank paper (a rule-bearing block is neither → dropped)
         }
 
-        // Keep every content block; for each blank run keep one block on each side (the gap + quiet zone) and
-        // drop the rest. A run of ≤ 2 blocks is left untouched.
+        // Keep every content block. Keep an empty block only where it touches content — one gap + quiet zone on
+        // each side of a content region — and drop the interior of blank runs and every rule/border block.
         var keep = new bool[blockCount];
         for (var b = 0; b < blockCount; b++)
-            keep[b] = !blank[b];
-        for (var b = 0; b < blockCount;)
-        {
-            if (!blank[b]) { b++; continue; }
-            var start = b;
-            while (b < blockCount && blank[b]) b++;
-            keep[start] = true;       // adjacent to the content above (or the top edge)
-            keep[b - 1] = true;       // adjacent to the content below (or the bottom edge)
-        }
+            keep[b] = content[b]
+                   || (empty[b] && ((b > 0 && content[b - 1]) || (b < blockCount - 1 && content[b + 1])));
 
         // Gather the kept blocks into contiguous source-row segments.
         var segments = new List<(int Top, int Height)>();
