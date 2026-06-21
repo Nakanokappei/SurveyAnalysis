@@ -20,6 +20,9 @@ public interface IDataProtector
     // Recovers a stored value: our ciphertext is decrypted, plaintext passes through unchanged, and an
     // unrecoverable ciphertext yields Mask.
     string Decode(string stored);
+
+    // True when a stored value is already one of ours (encrypted), so a migration can skip re-encoding it.
+    bool IsEncoded(string stored);
 }
 
 // The no-op protector: stores and returns values verbatim (no encryption). The default for repositories
@@ -32,4 +35,5 @@ public sealed class IdentityDataProtector : IDataProtector
     public string Mask => "";
     public string Encode(string plaintext) => plaintext;
     public string Decode(string stored) => stored;
+    public bool IsEncoded(string stored) => false;
 }

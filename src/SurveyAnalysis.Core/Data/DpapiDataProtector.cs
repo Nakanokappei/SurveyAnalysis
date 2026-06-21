@@ -22,6 +22,8 @@ public sealed class DpapiDataProtector : IDataProtector
     public bool IsUnlocked => _key is not null;
     public string Mask => "🔒";
 
+    public bool IsEncoded(string stored) => stored.StartsWith(Prefix, StringComparison.Ordinal);
+
     public string Encode(string plaintext)
     {
         if (string.IsNullOrEmpty(plaintext))

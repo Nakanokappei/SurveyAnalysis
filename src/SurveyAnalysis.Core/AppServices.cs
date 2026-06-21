@@ -41,6 +41,13 @@ public static class AppServices
     public static readonly ILlmCache LlmCache = new SqliteLlmCache(CacheDatabase);
     public static readonly ILlmClient Llm = CreateLlmClient();
 
+    // Runs after the field initializers above (Database + Protector are ready): a one-time, idempotent pass
+    // that encrypts any PII still stored in plaintext from before encryption was added.
+    static AppServices()
+    {
+        PiiMigration.EncryptExisting(Database, Protector);
+    }
+
     private static AppDatabase CreateDatabase()
     {
         var database = AppDatabase.Default();
