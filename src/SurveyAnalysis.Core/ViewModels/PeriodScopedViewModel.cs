@@ -35,11 +35,21 @@ public abstract class PeriodScopedViewModel : ViewModelBase
 
     protected abstract void Reload();
 
-    // One analysis column per project field (aggregation chosen from its type), skipping the field
-    // that is the grouping dimension — it is the rows, so it is not also a column.
-    protected static IReadOnlyList<AnalysisColumn> ColumnsFor(Project project, string? excludeField) =>
-        project.Fields
-            .Where(f => !string.IsNullOrWhiteSpace(f.Name) && f.Name != excludeField)
-            .Select(f => new AnalysisColumn(f.Name, FieldAggregationInfo.For(f)))
+    // The single 件数 column of a plain 軸 summary (時間別 / 曜日別 / 地域別 / トピック別 / 選択肢別): the
+    // group's response count, shown beside the 感情極性 column.
+    protected static readonly IReadOnlyList<AnalysisColumn> CountColumn =
+        new[] { new AnalysisColumn("件数", FieldAggregation.Count) };
+
+    // The analysis columns for a cross-tab: one 件数 column per category (in column order) then a 合計
+    // 件数 column. The cell counts come from AnalyticsRepository.AggregateCrossTab.
+    protected static IReadOnlyList<AnalysisColumn> CrossTabColumns(IReadOnlyList<string> categories) =>
+        categories.Select(c => new AnalysisColumn(c, FieldAggregation.Count))
+            .Append(new AnalysisColumn("合計", FieldAggregation.Count))
             .ToList();
+
+    // The description under a cross-tab report's title (axis = 期間 / 曜日 / 地域).
+    protected static string CrossTabDescription(string axis, CrossTabSpec spec) =>
+        spec.Kind == CrossTabKind.Topic
+            ? $"{axis}ごとに「{spec.Name}」のトピック別件数を集計します。行をクリックすると個票を表示します。"
+            : $"{axis}ごとに「{spec.Name}」の選択肢別件数（複数選択は各オプションに計上）を集計します。行をクリックすると個票を表示します。";
 }

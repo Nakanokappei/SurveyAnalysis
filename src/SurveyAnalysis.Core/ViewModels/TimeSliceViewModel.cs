@@ -21,9 +21,16 @@ public partial class TimeSliceViewModel : PeriodScopedViewModel, ISliceView
     private readonly long _projectId;
     private readonly string? _dateFieldName;
     private readonly string? _excerptFieldName;
+    // Non-null when this is a cross-tab (期間別 × a 質問); its categories are the columns. Null = plain 期間.
+    private readonly CrossTabSpec? _crossTab;
+    private readonly IReadOnlyList<string>? _categories;
 
-    // One column per project field, with the aggregation chosen from its type.
+    // 件数 only for the plain axis summary, or one count column per the chosen 質問's category (+ 合計).
     public IReadOnlyList<AnalysisColumn> Columns { get; }
+
+    // The header title / description (plain = 期間; cross-tab = 期間別 ・ {質問}).
+    public string Title { get; }
+    public string? Description { get; }
 
     // The drill path; the last entry is the current scope. Drives the breadcrumb and 戻る.
     private readonly List<TimeScope> _path = new();
@@ -78,22 +85,36 @@ public partial class TimeSliceViewModel : PeriodScopedViewModel, ISliceView
     ICommand ISliceView.DrillIntoCommand => DrillIntoCommand;
     ICommand ISliceView.NavigateCrumbCommand => NavigateCrumbCommand;
 
-    public TimeSliceViewModel(Project project, AnalyticsRepository analytics)
+    public TimeSliceViewModel(Project project, AnalyticsRepository analytics, CrossTabSpec? crossTab = null)
     {
         _analytics = analytics;
         _projectId = project.Id;
+        _crossTab = crossTab;
 
         // The aggregation date field drives the hierarchy; the excerpt comes from a free-text (or
         // sentiment) field — never from a personal-information field.
         _dateFieldName = AnalyticsRepository.DateField(project);
-        // The grouping field (the time basis) is the rows, so it is not also shown as a column.
-        Columns = ColumnsFor(project, _dateFieldName);
         _excerptFieldName =
             project.Fields.FirstOrDefault(f => f.FieldType == FieldType.FreeText)?.Name
             ?? project.Fields.FirstOrDefault(f => f.Analysis == AnalysisMethod.Sentiment)?.Name;
 
-        // Keep the star current with the latest imported responses.
+        // Keep the star current with the latest imported responses (cross-tab columns read its dictionaries).
         analytics.Rebuild(project);
+
+        // Plain report: 件数 per period. Cross-tab: a count column per the question's category (+ 合計).
+        if (crossTab is not null)
+        {
+            _categories = analytics.CrossTabCategories(crossTab);
+            Columns = CrossTabColumns(_categories);
+            Title = $"期間別 ・ {crossTab.Name}";
+            Description = CrossTabDescription("期間", crossTab);
+        }
+        else
+        {
+            Columns = CountColumn;
+            Title = "期間";
+            Description = null;
+        }
 
         // Without a date field there is no time hierarchy to walk.
         if (_dateFieldName is null)
@@ -176,7 +197,9 @@ public partial class TimeSliceViewModel : PeriodScopedViewModel, ISliceView
             return;
         }
 
-        var table = _analytics.AggregateRows(_projectId, AnalysisGrouping.Time, scope, from, to, Columns);
+        var table = _crossTab is null
+            ? _analytics.AggregateRows(_projectId, AnalysisGrouping.Time, scope, from, to, Columns)
+            : _analytics.AggregateCrossTab(_projectId, AnalysisGrouping.Time, scope, from, to, _crossTab, _categories!);
         foreach (var row in table.Rows)
             Rows.Add(row);
         TotalRow = table.Rows.Count > 0 ? table.Total : null;

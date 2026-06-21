@@ -10,6 +10,7 @@ internal sealed class WeekdaySliceControl : SliceControlBase<WeekdaySliceViewMod
 {
     public WeekdaySliceControl(WeekdaySliceViewModel vm) : base(vm) { }
 
-    protected override string HeaderTitle => "曜日";
+    protected override string HeaderTitle => _vm.Title;
+    protected override string? HeaderDescription => _vm.Description;
     protected override string GridDimensionHeader => "曜日";
 }

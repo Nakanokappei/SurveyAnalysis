@@ -24,8 +24,15 @@ public partial class WeekdaySliceViewModel : PeriodScopedViewModel, ISliceView
     private readonly bool _hasDateField;
     private readonly string? _dateFieldName;
     private readonly string? _excerptFieldName;
+    // Non-null when this is a cross-tab (曜日別 × a 質問); its categories are the columns. Null = plain 曜日.
+    private readonly CrossTabSpec? _crossTab;
+    private readonly IReadOnlyList<string>? _categories;
 
     public IReadOnlyList<AnalysisColumn> Columns { get; }
+
+    // The header title / description (plain = 曜日; cross-tab = 曜日別 ・ {質問}).
+    public string Title { get; }
+    public string? Description { get; }
     public ObservableCollection<AnalysisRow> Rows { get; } = new();
     public ObservableCollection<SurveyRow> Responses { get; } = new();
     public ObservableCollection<Crumb> Breadcrumbs { get; } = new();
@@ -60,19 +67,33 @@ public partial class WeekdaySliceViewModel : PeriodScopedViewModel, ISliceView
     ICommand ISliceView.DrillIntoCommand => DrillIntoCommand;
     ICommand ISliceView.NavigateCrumbCommand => NavigateCrumbCommand;
 
-    public WeekdaySliceViewModel(Project project, AnalyticsRepository analytics)
+    public WeekdaySliceViewModel(Project project, AnalyticsRepository analytics, CrossTabSpec? crossTab = null)
     {
         _analytics = analytics;
         _projectId = project.Id;
+        _crossTab = crossTab;
         _dateFieldName = AnalyticsRepository.DateField(project);
-        // The time basis is the rows (曜日), so the date field is not also shown as a column.
-        Columns = ColumnsFor(project, _dateFieldName);
 
         _excerptFieldName =
             project.Fields.FirstOrDefault(f => f.FieldType == FieldType.FreeText)?.Name
             ?? project.Fields.FirstOrDefault(f => f.Analysis == AnalysisMethod.Sentiment)?.Name;
 
         analytics.Rebuild(project);
+
+        // Plain report: 件数 per weekday. Cross-tab: a count column per the question's category (+ 合計).
+        if (crossTab is not null)
+        {
+            _categories = analytics.CrossTabCategories(crossTab);
+            Columns = CrossTabColumns(_categories);
+            Title = $"曜日別 ・ {crossTab.Name}";
+            Description = CrossTabDescription("曜日", crossTab);
+        }
+        else
+        {
+            Columns = CountColumn;
+            Title = "曜日";
+            Description = null;
+        }
 
         _hasDateField = _dateFieldName is not null;
         if (!_hasDateField)
@@ -113,7 +134,9 @@ public partial class WeekdaySliceViewModel : PeriodScopedViewModel, ISliceView
         IsResponseView = false;
         var (from, to) = Window;
         SentimentTrend = _analytics.SentimentTrend(_projectId, from, to);
-        var table = _analytics.AggregateRows(_projectId, AnalysisGrouping.Weekday, TimeScope.Root, from, to, Columns);
+        var table = _crossTab is null
+            ? _analytics.AggregateRows(_projectId, AnalysisGrouping.Weekday, TimeScope.Root, from, to, Columns)
+            : _analytics.AggregateCrossTab(_projectId, AnalysisGrouping.Weekday, TimeScope.Root, from, to, _crossTab, _categories!);
 
         Rows.Clear();
         foreach (var row in table.Rows)

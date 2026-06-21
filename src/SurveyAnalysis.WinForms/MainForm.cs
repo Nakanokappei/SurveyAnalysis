@@ -233,8 +233,11 @@ public sealed class MainForm : Form
                 break;
             case nameof(MainWindowViewModel.CurrentProject):
             case nameof(MainWindowViewModel.IsProjectOpen):
-            case nameof(MainWindowViewModel.IsTimeExpanded):
+            case nameof(MainWindowViewModel.IsPeriodExpanded):
+            case nameof(MainWindowViewModel.IsWeekdayExpanded):
+            case nameof(MainWindowViewModel.IsRegionExpanded):
             case nameof(MainWindowViewModel.IsTopicExpanded):
+            case nameof(MainWindowViewModel.IsChoiceExpanded):
                 RebuildSidebar();
                 break;
         }
@@ -294,11 +297,14 @@ public sealed class MainForm : Form
         }
         AddRow(bottom, NavButton(Icons.Settings, "設定", OnSettings));
 
-        // Main navigation fills the space above the bottom actions. No AutoScroll: the few nav rows always
-        // fit, and the trailing filler row absorbs the slack — AutoScroll only produced a phantom
-        // scrollbar (a TableLayoutPanel with a Percent filler row reports content just over its height).
+        // Main navigation fills the space above the bottom actions. It can now grow tall (each 軸 expands
+        // into a 質問 sub-menu), so it sits in an AutoScroll host and the stack itself is Top + AutoSize —
+        // it scrolls when the expanded menus exceed the height instead of clipping.
+        var navScroll = new Panel { Dock = DockStyle.Fill, AutoScroll = true, BackColor = Theme.SidebarBack };
         var nav = NavStack();
-        nav.Dock = DockStyle.Fill;
+        nav.Dock = DockStyle.Top;
+        nav.AutoSize = true;
+        nav.AutoSizeMode = AutoSizeMode.GrowAndShrink;
         nav.Padding = new Padding(0, LogicalToDeviceUnits(14), 0, 0);
 
         var heading = new Label
@@ -344,35 +350,27 @@ public sealed class MainForm : Form
         {
             AddRow(nav, NavButton(Icons.Dashboard, "ダッシュボード", () => _shell.OpenDashboardCommand.Execute(null)));
             AddRow(nav, SectionLabel("切り口"));
-            AddRow(nav, NavButton(_shell.IsTimeExpanded ? Icons.Expand : Icons.Collapse, "時間別", () => _shell.ToggleTimeCommand.Execute(null)));
-            if (_shell.IsTimeExpanded)
-            {
-                AddRow(nav, SubNavButton("期間", () => _shell.OpenPeriodCommand.Execute(null)));
-                AddRow(nav, SubNavButton("曜日", () => _shell.OpenWeekdayCommand.Execute(null)));
-            }
-            AddRow(nav, NavButton(Icons.Bullet, "地域別", () => _shell.OpenSliceCommand.Execute(SliceKind.Region)));
-            // トピック別 is an expandable section: one sub-item per 自由記述 question (built dynamically from
-            // the project), each opening that question's own topic report.
+
+            // 期間別 / 曜日別 / 地域別: clicking the axis opens its summary report and toggles a 質問 sub-menu;
+            // each 質問 sub-item opens that axis × question cross-tab.
+            AddAxis(nav, "期間別", _shell.IsPeriodExpanded, () => _shell.OpenPeriodCommand.Execute(null), AnalysisGrouping.Time);
+            AddAxis(nav, "曜日別", _shell.IsWeekdayExpanded, () => _shell.OpenWeekdayCommand.Execute(null), AnalysisGrouping.Weekday);
+            AddAxis(nav, "地域別", _shell.IsRegionExpanded, () => _shell.OpenRegionCommand.Execute(null), AnalysisGrouping.Region);
+
+            // トピック別 / 選択肢別: expandable only — one sub-item per 自由記述 / 選択肢 question, each opening
+            // that question's own report (topics / options as the rows).
             AddRow(nav, NavButton(_shell.IsTopicExpanded ? Icons.Expand : Icons.Collapse, "トピック別", () => _shell.ToggleTopicCommand.Execute(null)));
             if (_shell.IsTopicExpanded)
-            {
-                var questions = _shell.FreeTextQuestions;
-                if (questions.Count == 0)
-                    AddRow(nav, SubNavHint("（自由記述の質問がありません）"));
-                else
-                    foreach (var (id, name) in questions)
-                        AddRow(nav, SubNavButton(name, () => _shell.OpenTopicQuestion(id)));
-            }
+                AddQuestionSubmenu(nav, _shell.FreeTextQuestions, "（自由記述の質問がありません）", id => _shell.OpenTopicQuestion(id));
+
+            AddRow(nav, NavButton(_shell.IsChoiceExpanded ? Icons.Expand : Icons.Collapse, "選択肢別", () => _shell.ToggleChoiceCommand.Execute(null)));
+            if (_shell.IsChoiceExpanded)
+                AddQuestionSubmenu(nav, _shell.ChoiceQuestions, "（選択肢の質問がありません）", id => _shell.OpenChoiceQuestion(id));
         }
 
-        // Trailing filler row absorbs the leftover height so the nav buttons stay tight at the top
-        // (a Dock=Fill TableLayoutPanel otherwise stretches its last row and the centred button floats).
-        nav.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
-        nav.Controls.Add(new Panel { BackColor = Theme.SidebarBack, Margin = Padding.Empty }, 0, nav.RowCount);
-        nav.RowCount++;
-
-        _sidebar.Controls.Add(nav);     // Fill — add first
-        _sidebar.Controls.Add(bottom);  // Bottom
+        navScroll.Controls.Add(nav);       // Top + AutoSize inside the scroll host (no filler row needed)
+        _sidebar.Controls.Add(navScroll);  // Fill — add first
+        _sidebar.Controls.Add(bottom);     // Bottom
         _sidebar.ResumeLayout();
     }
 
@@ -443,6 +441,32 @@ public sealed class MainForm : Form
         button.Padding = new Padding(LogicalToDeviceUnits(28), 0, LogicalToDeviceUnits(6), 0);
         button.Height = LogicalToDeviceUnits(18);
         return button;
+    }
+
+    // An axis nav row (期間別 / 曜日別 / 地域別): a chevron tracking its expanded state. Clicking it opens the
+    // axis summary report and toggles the sub-menu; when expanded, one 質問 sub-item per cross-tab question
+    // opens that axis × question cross-tab. The 質問 list is the same for every axis (自由記述 + 選択肢 fields).
+    private void AddAxis(TableLayoutPanel nav, string label, bool expanded, Action onClick, AnalysisGrouping axis)
+    {
+        AddRow(nav, NavButton(expanded ? Icons.Expand : Icons.Collapse, label, onClick));
+        if (!expanded)
+            return;
+        var questions = _shell.CrossTabQuestions;
+        if (questions.Count == 0)
+            AddRow(nav, SubNavHint("（集計できる質問がありません）"));
+        else
+            foreach (var (id, name) in questions)
+                AddRow(nav, SubNavButton(name, () => _shell.OpenCrossTab(axis, id)));
+    }
+
+    // The 質問 sub-items for トピック別 / 選択肢別 — one per question, or a faint hint when there are none.
+    private void AddQuestionSubmenu(TableLayoutPanel nav, IReadOnlyList<(long Id, string Name)> questions, string emptyHint, Action<long> open)
+    {
+        if (questions.Count == 0)
+            AddRow(nav, SubNavHint(emptyHint));
+        else
+            foreach (var (id, name) in questions)
+                AddRow(nav, SubNavButton(name, () => open(id)));
     }
 
     // The 構成 (project configuration) button in the sidebar header — a bordered, 2-line-tall pill that

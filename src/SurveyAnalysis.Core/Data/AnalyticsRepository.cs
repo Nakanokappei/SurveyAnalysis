@@ -255,6 +255,32 @@ public sealed class AnalyticsRepository
         return ReadAnalysisMaps(command);
     }
 
+    // The 個票 for one 選択肢 option in the window — the 選択肢別 view's terminal. Matches responses whose
+    // fact links this field's option (fact_response_choice → dim_choice); （未選択） matches responses with
+    // no option for the field. A multi-select response appears under each option it chose.
+    public IReadOnlyList<ResponseAnalysis> ResponsesWithAnalysisForChoice(long projectId, long choiceFieldId, string optionValue, long? fromKey, long? toKey)
+    {
+        using var connection = _db.Open();
+        using var command = connection.CreateCommand();
+        command.Parameters.AddWithValue("$pid", projectId);
+        command.Parameters.AddWithValue("$cf", choiceFieldId);
+        string choiceWhere;
+        if (optionValue == UnselectedChoice)
+            choiceWhere = "NOT EXISTS (SELECT 1 FROM fact_response_choice frc JOIN dim_choice dc ON dc.choice_key = frc.choice_key WHERE frc.fact_id = f.fact_id AND dc.field_id = $cf)";
+        else
+        {
+            choiceWhere = "EXISTS (SELECT 1 FROM fact_response_choice frc JOIN dim_choice dc ON dc.choice_key = frc.choice_key WHERE frc.fact_id = f.fact_id AND dc.field_id = $cf AND dc.value = $opt)";
+            command.Parameters.AddWithValue("$opt", optionValue);
+        }
+        command.CommandText = AnalysisSelect
+            + "JOIN responses r ON r.id = f.response_id "
+            + "LEFT JOIN dim_topic t ON f.main_topic_key = t.topic_key "
+            + "LEFT JOIN answers a ON a.response_id = r.id "
+            + "LEFT JOIN fields fl ON fl.id = a.field_id "
+            + $"WHERE f.project_id = $pid AND {choiceWhere}{Window(fromKey, toKey, command)} ORDER BY r.id;";
+        return ReadAnalysisMaps(command);
+    }
+
     // The shared SELECT prefix (the column order ReadAnalysisMaps expects); callers append the joins and
     // their dimension's WHERE.
     private const string AnalysisSelect =
@@ -263,6 +289,7 @@ public sealed class AnalyticsRepository
 
     private const string UnsetRegion = "（未設定）";
     private const string UnanalyzedTopic = "（未分析）";
+    private const string UnselectedChoice = "（未選択）";
 
     // Appends the 集計期間 window predicate when both bounds are present, binding $from/$to onto the command.
     private static string Window(long? fromKey, long? toKey, SqliteCommand command)
@@ -327,6 +354,11 @@ public sealed class AnalyticsRepository
     // Scoped to one weekday (the 曜日 drill): the trend over time of just that day-of-week.
     public IReadOnlyList<SentimentTrendPoint> SentimentTrendForWeekday(long projectId, int dayOfWeek, long? fromKey, long? toKey)
         => SentimentTrend(projectId, fromKey, toKey, WeekdayTrendFilter(dayOfWeek));
+
+    // Scoped to one 選択肢 option (the 選択肢別 drill); （未選択） matches responses with no option for the
+    // field. A multi-select response contributes to each option it chose.
+    public IReadOnlyList<SentimentTrendPoint> SentimentTrendForChoice(long projectId, long choiceFieldId, string optionValue, long? fromKey, long? toKey)
+        => SentimentTrend(projectId, fromKey, toKey, ChoiceTrendFilter(choiceFieldId, optionValue));
 
     // One query: the average row sentiment per day (with its ISO-week attributes) for the filtered facts.
     // If the span is ≤ 30 days the days are the points; 31–183 days are merged into ISO weeks and > 183 days
@@ -429,6 +461,15 @@ public sealed class AnalyticsRepository
     {
         command.Parameters.AddWithValue("$dow", dayOfWeek);
         return ("", " AND d.day_of_week = $dow");
+    });
+
+    private static TrendFilter ChoiceTrendFilter(long choiceFieldId, string optionValue) => new(TimeScope.Root, command =>
+    {
+        command.Parameters.AddWithValue("$cf", choiceFieldId);
+        if (optionValue == UnselectedChoice)
+            return ("", " AND NOT EXISTS (SELECT 1 FROM fact_response_choice frc JOIN dim_choice dc ON dc.choice_key = frc.choice_key WHERE frc.fact_id = f.fact_id AND dc.field_id = $cf)");
+        command.Parameters.AddWithValue("$opt", optionValue);
+        return ("", " AND EXISTS (SELECT 1 FROM fact_response_choice frc JOIN dim_choice dc ON dc.choice_key = frc.choice_key WHERE frc.fact_id = f.fact_id AND dc.field_id = $cf AND dc.value = $opt)");
     });
 
     // A yyyymmdd date_key as a DateTime — for span maths and the short axis label.
@@ -622,6 +663,157 @@ public sealed class AnalyticsRepository
         return new AnalysisTable(rows, new AnalysisRow("全体", totalCells, totalCount, null, grand.SentimentCell()));
     }
 
+    // ===== Cross-tab table (軸 rows × a 質問's categories) =====
+
+    // The categories that become a cross-tab's columns for one question, in column order: a 自由記述
+    // question's topics (its dim_topic dictionary, creation order) then （未分析）; or a 選択肢 question's
+    // options (its dim_choice values, import order) then （未選択）. Fixed for the report's lifetime so the
+    // table keeps the same columns across 集計期間 changes (a category with no response in the window reads 0).
+    public IReadOnlyList<string> CrossTabCategories(CrossTabSpec spec)
+    {
+        using var connection = _db.Open();
+        using var command = connection.CreateCommand();
+        command.Parameters.AddWithValue("$cf", spec.FieldId);
+        // Topics in dictionary order (field_topics is the source dictionary; dim_topic's surrogate key is
+        // assigned in projection order, which need not match). Choice options in import order (dim_choice).
+        command.CommandText = spec.Kind == CrossTabKind.Topic
+            ? "SELECT label FROM field_topics WHERE field_id = $cf ORDER BY id;"
+            : "SELECT value FROM dim_choice WHERE field_id = $cf ORDER BY choice_key;";
+        var categories = new List<string>();
+        using (var reader = command.ExecuteReader())
+            while (reader.Read())
+                categories.Add(reader.GetString(0));
+        categories.Add(spec.Kind == CrossTabKind.Topic ? UnanalyzedTopic : UnselectedChoice);
+        return categories;
+    }
+
+    // Pivots the responses in a 軸 (時間別 / 曜日別 / 地域別) scope into a contingency table: one row per axis
+    // group, one cell per category of the chosen 質問 (a count of the group's responses in that category), a
+    // 感情極性 column (the group's average row sentiment) and a trailing 合計 (the group's distinct response
+    // count). A multi-select 選択肢 response counts under each option it chose, so the category cells can sum
+    // past 合計. Column order matches `categories` (from CrossTabCategories); the 全体 row holds the column
+    // totals. rowGrouping is Time / Weekday / Region; for Time each row also carries the scope to drill into.
+    public AnalysisTable AggregateCrossTab(
+        long projectId, AnalysisGrouping rowGrouping, TimeScope scope,
+        long? fromKey, long? toKey, CrossTabSpec column, IReadOnlyList<string> categories)
+    {
+        using var connection = _db.Open();
+        using var command = connection.CreateCommand();
+        command.Parameters.AddWithValue("$pid", projectId);
+        command.Parameters.AddWithValue("$cf", column.FieldId);
+        var where = ScopeWhere(scope, fromKey, toKey, command);
+
+        // The row dimension supplies its grouping columns (read back by Identify) + its join; the column
+        // dimension contributes one category label per response (one row per topic, or one row per chosen
+        // option for a multi-select). No answers/fields join — cross-tab cells are counts, not field values.
+        var (rowSelect, rowJoin) = rowGrouping == AnalysisGrouping.Region
+            ? ("COALESCE(g.prefecture, '（未設定）') AS glabel",
+               "LEFT JOIN dim_region g ON f.region_key = g.region_key")
+            : ("""
+               d.fiscal_year AS fy, d.fiscal_year_label AS fylabel,
+               d.year AS yr, d.month AS mo, d.month_label AS molabel,
+               d.week_year AS wy, d.week_of_year AS wo, d.week_label AS wlabel,
+               d.date_key AS dkey, d.full_date AS fdate,
+               d.day_of_week AS dow, d.day_of_week_label AS dowlabel
+               """,
+               "JOIN dim_date d ON f.date_key = d.date_key");
+
+        var (catExpr, catJoin) = column.Kind == CrossTabKind.Topic
+            ? ("COALESCE(t.label, '（未分析）') AS cat",
+               "LEFT JOIN fact_response_topic frt ON frt.fact_id = f.fact_id AND frt.field_id = $cf "
+               + "LEFT JOIN dim_topic t ON frt.topic_key = t.topic_key")
+            : ("COALESCE(c.value, '（未選択）') AS cat",
+               "LEFT JOIN (SELECT frc.fact_id, dc.value FROM fact_response_choice frc "
+               + "JOIN dim_choice dc ON dc.choice_key = frc.choice_key WHERE dc.field_id = $cf) c ON c.fact_id = f.fact_id");
+
+        command.CommandText =
+            $"SELECT {rowSelect}, r.id AS rid, f.sentiment_score AS sscore, {catExpr} "
+            + "FROM fact_response f "
+            + $"{rowJoin} "
+            + "JOIN responses r ON r.id = f.response_id "
+            + $"{catJoin} "
+            + $"WHERE {where};";
+
+        var groups = new Dictionary<string, CrossGroup>();
+        var grand = new CrossGroup("全体", null, 0);
+        using (var reader = command.ExecuteReader())
+        {
+            var ridOrd = reader.GetOrdinal("rid");
+            var sOrd = reader.GetOrdinal("sscore");
+            var catOrd = reader.GetOrdinal("cat");
+            while (reader.Read())
+            {
+                var (key, label, child, sortKey) = Identify(reader, rowGrouping, scope);
+                if (!groups.TryGetValue(key, out var group))
+                    groups[key] = group = new CrossGroup(label, child, sortKey);
+                var rid = reader.GetInt64(ridOrd);
+                var sentiment = reader.IsDBNull(sOrd) ? (double?)null : reader.GetDouble(sOrd);
+                group.Add(rid, sentiment, reader.GetString(catOrd));
+                grand.Add(rid, sentiment, reader.GetString(catOrd));
+            }
+        }
+
+        // Region largest-first; Weekday Mon→Sun; Time newest period first — matching the plain reports.
+        IEnumerable<CrossGroup> ordered = rowGrouping switch
+        {
+            AnalysisGrouping.Region => groups.Values.OrderByDescending(g => g.Total),
+            AnalysisGrouping.Weekday => groups.Values.OrderBy(g => g.SortKey),
+            _ => groups.Values.OrderByDescending(g => g.SortKey),
+        };
+
+        var rows = ordered
+            .Select(g => new AnalysisRow(g.Label, g.Cells(categories), g.Total, g.Child, g.SentimentCell()))
+            .ToList();
+        return new AnalysisTable(rows, new AnalysisRow("全体", grand.Cells(categories), grand.Total, null, grand.SentimentCell()));
+    }
+
+    // In-memory accumulator for one cross-tab axis group: each response's sentiment (deduped by id) and,
+    // per category, the set of responses that fell in it (a set, so a multi-select response is never
+    // double-counted within one option).
+    private sealed class CrossGroup
+    {
+        public string Label { get; }
+        public TimeScope? Child { get; }
+        public long SortKey { get; }
+        public Dictionary<long, double?> Sentiment { get; } = new();
+        private readonly Dictionary<string, HashSet<long>> _byCategory = new();
+
+        public CrossGroup(string label, TimeScope? child, long sortKey)
+        {
+            Label = label;
+            Child = child;
+            SortKey = sortKey;
+        }
+
+        public void Add(long responseId, double? sentiment, string category)
+        {
+            Sentiment[responseId] = sentiment;
+            if (!_byCategory.TryGetValue(category, out var set))
+                _byCategory[category] = set = new HashSet<long>();
+            set.Add(responseId);
+        }
+
+        // The group's distinct response count (the 合計 column and the summary denominator).
+        public int Total => Sentiment.Count;
+
+        // One count cell per category (in column order) followed by the 合計 cell.
+        public IReadOnlyList<string> Cells(IReadOnlyList<string> categories)
+        {
+            var cells = new List<string>(categories.Count + 1);
+            foreach (var category in categories)
+                cells.Add((_byCategory.TryGetValue(category, out var set) ? set.Count : 0).ToString());
+            cells.Add(Total.ToString());
+            return cells;
+        }
+
+        // The group's average 感情極性 ("+0.00" / "—" when none of its responses are scored).
+        public string SentimentCell()
+        {
+            var scores = Sentiment.Values.Where(v => v.HasValue).Select(v => v!.Value).ToList();
+            return scores.Count == 0 ? "—" : scores.Average().ToString("+0.00;-0.00;0.00");
+        }
+    }
+
     // Extracts a group's identity (dedupe key, display label, drill scope, sort key) from a raw row.
     private static (string Key, string Label, TimeScope? Child, long SortKey) Identify(
         SqliteDataReader reader, AnalysisGrouping grouping, TimeScope scope)
@@ -710,6 +902,8 @@ public sealed class AnalyticsRepository
             FieldAggregation.DistinctCount => (_distinct.TryGetValue(column.Name, out var s) ? s.Count : 0).ToString(),
             FieldAggregation.Sum => _numeric.TryGetValue(column.Name, out var ns) && ns.N > 0 ? Number(ns.Sum) : "—",
             FieldAggregation.Average => _numeric.TryGetValue(column.Name, out var na) && na.N > 0 ? (na.Sum / na.N).ToString("0.0") : "—",
+            // 件数: how many responses fell in this group (the axis-summary report's only data column).
+            FieldAggregation.Count => Sentiment.Count.ToString(),
             _ => SentimentCell(),
         };
 

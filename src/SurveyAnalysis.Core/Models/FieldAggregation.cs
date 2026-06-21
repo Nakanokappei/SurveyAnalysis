@@ -11,6 +11,7 @@ public enum FieldAggregation
     Sum,               // 合計: sum of the numeric values
     Average,           // 平均: average of the numeric values
     SentimentAverage,  // 平均(感情): average of fact_response.sentiment_score (— until LLM)
+    Count,             // 件数: number of responses in the group (the axis summary + cross-tab cells)
 }
 
 public static class FieldAggregationInfo
@@ -35,6 +36,7 @@ public static class FieldAggregationInfo
         FieldAggregation.Sum => "合計",
         FieldAggregation.Average => "平均",
         FieldAggregation.SentimentAverage => "平均",
+        FieldAggregation.Count => "件数",
         _ => "",
     };
 }

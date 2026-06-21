@@ -17,7 +17,8 @@ internal sealed class TimeSliceControl : SliceControlBase<TimeSliceViewModel>
 
     public TimeSliceControl(TimeSliceViewModel vm) : base(vm) { }
 
-    protected override string HeaderTitle => "期間";
+    protected override string HeaderTitle => _vm.Title;
+    protected override string? HeaderDescription => _vm.Description;
     protected override string GridDimensionHeader => "区分";
     protected override Control? AboveEmptyRow => _levelTitle;
 

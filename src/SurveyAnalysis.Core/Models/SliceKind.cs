@@ -7,7 +7,8 @@ public enum SliceKind
 {
     Time,    // 時間別
     Region,  // 地域別
-    Topic    // トピック別
+    Topic,   // トピック別
+    Choice   // 選択肢別
 }
 
 // Japanese labels for the slices, kept next to the enum so the UI wording stays greppable.
@@ -18,6 +19,7 @@ public static class SliceInfo
         SliceKind.Time => "時間別",
         SliceKind.Region => "地域別",
         SliceKind.Topic => "トピック別",
+        SliceKind.Choice => "選択肢別",
         _ => kind.ToString()
     };
 }

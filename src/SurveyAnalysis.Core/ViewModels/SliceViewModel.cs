@@ -9,11 +9,13 @@ using SurveyAnalysis.Models;
 
 namespace SurveyAnalysis.ViewModels;
 
-// 地域別 / トピック別: a flat analysis table grouping responses by region or topic within the 集計期間
-// window, every project field a column plus a 感情極性 column, with a trailing 全体 total row. Clicking a
-// group drills into its 個票一覧 (記入日 / トピック / 感情 / 抜粋, PII hidden); a breadcrumb walks back.
-// Region groups by 都道府県 etc. (missing → （未設定）); topic groups by the per-自由記述-column topic and
-// shows that topic's own sentiment. 時間別 is its own drill-down view (TimeSliceViewModel / Weekday…).
+// 地域別 / トピック別 / 選択肢別: a flat analysis table grouping responses by region, topic or 選択肢 option
+// within the 集計期間 window, with a 感情極性 column and a 件数 column (the dimension summary), or — when
+// 地域別 is cross-tabbed against a 質問 — one count column per that question's category (+ 合計). A trailing
+// 全体 total row holds the column totals. Clicking a group drills into its 個票一覧 (記入日 / トピック / 感情 /
+// 抜粋, PII hidden); a breadcrumb walks back. Region groups by 都道府県 (missing → （未設定）); topic groups by
+// the per-自由記述-column topic (its own sentiment); choice groups by the per-選択肢-column option (multi-
+// select split). 時間別 / 曜日別 are their own views (TimeSliceViewModel / WeekdaySliceViewModel).
 public partial class SliceViewModel : PeriodScopedViewModel, ISliceView
 {
     private readonly AnalyticsRepository _analytics;
@@ -21,12 +23,16 @@ public partial class SliceViewModel : PeriodScopedViewModel, ISliceView
     private readonly AnalysisGrouping _grouping;
     private readonly string? _dateFieldName;
     private readonly string? _excerptFieldName;
-    // > 0 when this is a per-質問 topic report scoped to one 自由記述 column; 0 means region / all-column.
-    private readonly long _topicFieldId;
+    // > 0 when scoped to one 質問 column: the 自由記述 column for トピック別, the 選択肢 column for 選択肢別.
+    // 0 for 地域別 (no scoping question).
+    private readonly long _questionFieldId;
+    // Non-null when 地域別 is cross-tabbed against a 質問; its categories are the columns. Null otherwise.
+    private readonly CrossTabSpec? _crossTab;
+    private readonly IReadOnlyList<string>? _categories;
 
     public string Title { get; }
     public string Description { get; }
-    // The leading (dimension) column heading: 地域 or トピック.
+    // The leading (dimension) column heading: 地域 / トピック / 選択肢.
     public string DimensionTitle { get; }
 
     public IReadOnlyList<AnalysisColumn> Columns { get; }
@@ -68,40 +74,62 @@ public partial class SliceViewModel : PeriodScopedViewModel, ISliceView
     // topicFieldId > 0 makes this a topic report for one 質問 (自由記述 column): its topics are the rows,
     // its per-column sentiment the 感情極性, and the report title is the question name. The トピック別 sidebar
     // entry opens one of these per 自由記述 question (a dynamic submenu).
-    public SliceViewModel(Project project, AnalyticsRepository analytics, SliceKind kind, long topicFieldId = 0)
+    public SliceViewModel(Project project, AnalyticsRepository analytics, SliceKind kind, long questionFieldId = 0, CrossTabSpec? crossTab = null)
     {
         _analytics = analytics;
         _projectId = project.Id;
-        _grouping = kind == SliceKind.Topic ? AnalysisGrouping.Topic : AnalysisGrouping.Region;
-        _topicFieldId = topicFieldId;
-        DimensionTitle = kind == SliceKind.Topic ? "トピック" : "地域";
+        _grouping = kind switch
+        {
+            SliceKind.Topic => AnalysisGrouping.Topic,
+            SliceKind.Choice => AnalysisGrouping.Choice,
+            _ => AnalysisGrouping.Region,
+        };
+        _questionFieldId = questionFieldId;
+        _crossTab = crossTab;
+        DimensionTitle = kind switch
+        {
+            SliceKind.Topic => "トピック",
+            SliceKind.Choice => "選択肢",
+            _ => "地域",
+        };
 
-        var topicField = topicFieldId > 0 ? project.Fields.FirstOrDefault(f => f.Id == topicFieldId) : null;
+        var questionField = questionFieldId > 0 ? project.Fields.FirstOrDefault(f => f.Id == questionFieldId) : null;
 
-        Title = topicField?.Name ?? SliceInfo.Label(kind);
+        Title = kind switch
+        {
+            SliceKind.Region when crossTab is not null => $"地域別 ・ {crossTab.Name}",
+            SliceKind.Region => "地域別",
+            _ => questionField?.Name ?? SliceInfo.Label(kind),
+        };
         Description = kind switch
         {
+            SliceKind.Region when crossTab is not null => CrossTabDescription("地域", crossTab),
             SliceKind.Region => "回答を地域（住所・都道府県・市区町村）ごとに集計します。行をクリックすると個票を表示します。",
-            SliceKind.Topic when topicField is not null => $"「{topicField.Name}」の回答をトピックごとに集計します。感情極性はトピックごとの平均です。行をクリックすると個票を表示します。",
+            SliceKind.Topic when questionField is not null => $"「{questionField.Name}」の回答をトピックごとに集計します。感情極性はトピックごとの平均です。行をクリックすると個票を表示します。",
             SliceKind.Topic => "回答をトピックごとに集計します。感情極性はトピックごとの平均です。行をクリックすると個票を表示します。",
+            SliceKind.Choice when questionField is not null => $"「{questionField.Name}」の回答を選択肢ごとに集計します（複数選択は各オプションに計上）。行をクリックすると個票を表示します。",
+            SliceKind.Choice => "回答を選択肢ごとに集計します（複数選択は各オプションに計上）。行をクリックすると個票を表示します。",
             _ => ""
         };
 
-        // The grouping basis is the rows, so it is not also a column: the question field for a scoped topic
-        // report, else the region field (an all-column topic report excludes its Analysis=Topic field).
-        var groupingField = topicField?.Name
-            ?? (kind == SliceKind.Topic ? AnalyticsRepository.TopicField(project) : AnalyticsRepository.RegionField(project));
-        Columns = ColumnsFor(project, groupingField);
-
-        // 個票 fields: 記入日 from the aggregation date; the excerpt is the scoped question's text (else the
-        // first free-text / sentiment field).
+        // 個票 fields: 記入日 from the aggregation date; the excerpt is the scoped 自由記述 question's text
+        // (トピック別) else the first free-text / sentiment field (選択肢別・地域別 have no text question).
         _dateFieldName = AnalyticsRepository.DateField(project);
-        _excerptFieldName = topicField?.Name
+        _excerptFieldName = (kind == SliceKind.Topic ? questionField?.Name : null)
             ?? project.Fields.FirstOrDefault(f => f.FieldType == FieldType.FreeText)?.Name
             ?? project.Fields.FirstOrDefault(f => f.Analysis == AnalysisMethod.Sentiment)?.Name;
 
-        // Keep the star current with the latest imported responses.
+        // Keep the star current with the latest imported responses (cross-tab columns read its dictionaries).
         analytics.Rebuild(project);
+
+        // Columns: a cross-tab's category counts (+ 合計), else just 件数 for the dimension summary.
+        if (crossTab is not null)
+        {
+            _categories = analytics.CrossTabCategories(crossTab);
+            Columns = CrossTabColumns(_categories);
+        }
+        else
+            Columns = CountColumn;
 
         Reload();
     }
@@ -114,14 +142,20 @@ public partial class SliceViewModel : PeriodScopedViewModel, ISliceView
             return;
 
         var (from, to) = Window;
-        var responses = _grouping == AnalysisGrouping.Topic
-            ? _analytics.ResponsesWithAnalysisForTopic(_projectId, row.Label, from, to, _topicFieldId > 0 ? _topicFieldId : null)
-            : _analytics.ResponsesWithAnalysisForRegion(_projectId, row.Label, from, to);
+        var responses = _grouping switch
+        {
+            AnalysisGrouping.Topic => _analytics.ResponsesWithAnalysisForTopic(_projectId, row.Label, from, to, _questionFieldId > 0 ? _questionFieldId : null),
+            AnalysisGrouping.Choice => _analytics.ResponsesWithAnalysisForChoice(_projectId, _questionFieldId, row.Label, from, to),
+            _ => _analytics.ResponsesWithAnalysisForRegion(_projectId, row.Label, from, to),
+        };
 
-        // The trend follows the drill: scoped to the selected region / topic.
-        SentimentTrend = _grouping == AnalysisGrouping.Topic
-            ? _analytics.SentimentTrendForTopic(_projectId, row.Label, from, to, _topicFieldId > 0 ? _topicFieldId : null)
-            : _analytics.SentimentTrendForRegion(_projectId, row.Label, from, to);
+        // The trend follows the drill: scoped to the selected region / topic / option.
+        SentimentTrend = _grouping switch
+        {
+            AnalysisGrouping.Topic => _analytics.SentimentTrendForTopic(_projectId, row.Label, from, to, _questionFieldId > 0 ? _questionFieldId : null),
+            AnalysisGrouping.Choice => _analytics.SentimentTrendForChoice(_projectId, _questionFieldId, row.Label, from, to),
+            _ => _analytics.SentimentTrendForRegion(_projectId, row.Label, from, to),
+        };
 
         TotalRow = null;   // the 個票 list has no column table
         Responses.Clear();
@@ -152,7 +186,11 @@ public partial class SliceViewModel : PeriodScopedViewModel, ISliceView
         IsResponseView = false;
         var (from, to) = Window;
         SentimentTrend = _analytics.SentimentTrend(_projectId, from, to);
-        var table = _analytics.AggregateRows(_projectId, _grouping, TimeScope.Root, from, to, Columns, topicFieldId: _topicFieldId > 0 ? _topicFieldId : null);
+        var table = _crossTab is not null
+            ? _analytics.AggregateCrossTab(_projectId, AnalysisGrouping.Region, TimeScope.Root, from, to, _crossTab, _categories!)
+            : _analytics.AggregateRows(_projectId, _grouping, TimeScope.Root, from, to, Columns,
+                choiceFieldId: _grouping == AnalysisGrouping.Choice ? _questionFieldId : null,
+                topicFieldId: _grouping == AnalysisGrouping.Topic && _questionFieldId > 0 ? _questionFieldId : null);
 
         Rows.Clear();
         foreach (var row in table.Rows)
@@ -162,8 +200,9 @@ public partial class SliceViewModel : PeriodScopedViewModel, ISliceView
         Breadcrumbs.Clear();
         Breadcrumbs.Add(new Crumb(DimensionTitle, 0));
 
-        var total = table.Rows.Sum(r => r.Count);
-        CountSummary = $"合計 {total} 件 ・ {table.Rows.Count} グループ";
+        // 件数 = distinct responses (the 全体 row's count), not the sum of group counts: a multi-select
+        // 選択肢 response falls in several option groups, so summing the rows would over-count it.
+        CountSummary = $"合計 {table.Total.Count} 件 ・ {table.Rows.Count} グループ";
         HasData = table.Rows.Count > 0;
         EmptyMessage = HasData ? "" : "この集計期間には回答がありません。右上の集計期間を広げてください。";
     }

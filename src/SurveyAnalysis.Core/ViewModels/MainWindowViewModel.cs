@@ -174,14 +174,70 @@ public partial class MainWindowViewModel : ViewModelBase
             CurrentPage = new DashboardViewModel(project, _analytics);
     }
 
-    // 切り口（時間別 / 地域別 / トピック別）をスタースキーマから集計して表示。
-    // 地域別 / トピック別（フラット集計）。時間別はサブメニュー（期間 / 曜日）に分かれる。
+    // 切り口は5軸: 期間別 / 曜日別 / 地域別（クリックで「軸＋感情極性＋件数」のサマリーを開きつつサブメニュー
+    // を開閉。サブ項目＝質問を選ぶと「軸×その質問」のクロス集計）と、トピック別 / 選択肢別（開閉のみ。サブ項目
+    // ＝質問ごとの個別レポート）。クロス集計の質問列は自由記述→トピック、選択肢→選択肢オプション（;分割）。
+
+    [ObservableProperty]
+    private bool _isPeriodExpanded;
+
+    // 期間別: 年度→月→週→日→個票のドリルダウン（サマリー）を開きつつ、質問サブメニューを開閉。
     [RelayCommand]
-    private void OpenSlice(SliceKind kind)
+    private void OpenPeriod()
     {
+        IsPeriodExpanded = !IsPeriodExpanded;
         if (CurrentProject is { } project)
-            CurrentPage = new SliceViewModel(project, _analytics, kind);
+            CurrentPage = new TimeSliceViewModel(project, _analytics);
     }
+
+    [ObservableProperty]
+    private bool _isWeekdayExpanded;
+
+    // 曜日別: 曜日サマリーを開きつつ、質問サブメニューを開閉。
+    [RelayCommand]
+    private void OpenWeekday()
+    {
+        IsWeekdayExpanded = !IsWeekdayExpanded;
+        if (CurrentProject is { } project)
+            CurrentPage = new WeekdaySliceViewModel(project, _analytics);
+    }
+
+    [ObservableProperty]
+    private bool _isRegionExpanded;
+
+    // 地域別: 地域サマリーを開きつつ、質問サブメニューを開閉。
+    [RelayCommand]
+    private void OpenRegion()
+    {
+        IsRegionExpanded = !IsRegionExpanded;
+        if (CurrentProject is { } project)
+            CurrentPage = new SliceViewModel(project, _analytics, SliceKind.Region);
+    }
+
+    // 期間別 / 曜日別 / 地域別 → ある質問とのクロス集計（行＝軸、列＝その質問のトピック or 選択肢オプション）。
+    public void OpenCrossTab(AnalysisGrouping axis, long fieldId)
+    {
+        if (CurrentProject is not { } project)
+            return;
+        if (project.Fields.FirstOrDefault(f => f.Id == fieldId) is not { } field)
+            return;
+        var kind = field.FieldType == FieldType.Choice ? CrossTabKind.Choice : CrossTabKind.Topic;
+        var spec = new CrossTabSpec(kind, fieldId, field.Name);
+        CurrentPage = axis switch
+        {
+            AnalysisGrouping.Time => new TimeSliceViewModel(project, _analytics, spec),
+            AnalysisGrouping.Weekday => new WeekdaySliceViewModel(project, _analytics, spec),
+            _ => new SliceViewModel(project, _analytics, SliceKind.Region, 0, spec),
+        };
+    }
+
+    // 期間別 / 曜日別 / 地域別 のクロス集計サブメニューに並ぶ質問の一覧（自由記述＝トピック列、選択肢＝選択肢列）。
+    public IReadOnlyList<(long Id, string Name)> CrossTabQuestions =>
+        CurrentProject?.Fields
+            .Where(f => (f.FieldType == FieldType.FreeText || f.FieldType == FieldType.Choice) && f.Id > 0 && !string.IsNullOrWhiteSpace(f.Name))
+            .Select(f => (f.Id, f.Name))
+            .ToList()
+        ?? new List<(long Id, string Name)>();
 
     // トピック別をサイドメニューで開閉（自由記述の質問ごとのサブメニューを出す）。
     [ObservableProperty]
@@ -205,27 +261,26 @@ public partial class MainWindowViewModel : ViewModelBase
             CurrentPage = new SliceViewModel(project, _analytics, SliceKind.Topic, fieldId);
     }
 
-    // 時間別をサイドメニューで開閉（期間 / 曜日 のサブメニューを出す）。
+    // 選択肢別をサイドメニューで開閉（選択肢の質問ごとのサブメニューを出す）。
     [ObservableProperty]
-    private bool _isTimeExpanded;
+    private bool _isChoiceExpanded;
 
     [RelayCommand]
-    private void ToggleTime() => IsTimeExpanded = !IsTimeExpanded;
+    private void ToggleChoice() => IsChoiceExpanded = !IsChoiceExpanded;
 
-    // 時間別 → 期間（年度→月→週→日→個票のドリルダウン）
-    [RelayCommand]
-    private void OpenPeriod()
+    // 選択肢（質問）の一覧。選択肢別はこの各質問を動的なサブメニュー項目にし、質問ごとの個別レポートを開く。
+    public IReadOnlyList<(long Id, string Name)> ChoiceQuestions =>
+        CurrentProject?.Fields
+            .Where(f => f.FieldType == FieldType.Choice && f.Id > 0 && !string.IsNullOrWhiteSpace(f.Name))
+            .Select(f => (f.Id, f.Name))
+            .ToList()
+        ?? new List<(long Id, string Name)>();
+
+    // 選択肢別 → ある質問の選択肢レポート（選択肢オプションごとの件数・感情・個票）を開く。
+    public void OpenChoiceQuestion(long fieldId)
     {
         if (CurrentProject is { } project)
-            CurrentPage = new TimeSliceViewModel(project, _analytics);
-    }
-
-    // 時間別 → 曜日（曜日別の集計）
-    [RelayCommand]
-    private void OpenWeekday()
-    {
-        if (CurrentProject is { } project)
-            CurrentPage = new WeekdaySliceViewModel(project, _analytics);
+            CurrentPage = new SliceViewModel(project, _analytics, SliceKind.Choice, fieldId);
     }
 
     // インポート（モーダルダイアログでCSVをマージ）
