@@ -13,9 +13,9 @@ namespace SurveyAnalysis.WinForms;
 // removes the blank/rule bands *between* rows, packing the content so a whole-page read sees each row larger
 // (forms are read top-to-bottom, so whole rows are the safe unit — a checkbox and its label stay together).
 // (3) CompressHorizontally does the same across columns (usually a smaller win, since full-width headers/rules
-// keep most interior gutters non-blank, but a genuinely empty side band still packs in). (4) The compacted page
-// is split into overlapping horizontal bands only as far as needed: a band taller than TargetBandHeightPx reads
-// at too low a DPI, so the page is divided into just enough bands to bring each under that height (capped at
+// keep most interior gutters non-blank, but a genuinely empty side band still packs in). (4) SplitIntoBands cuts
+// the compacted page into overlapping horizontal bands only as far as needed: a band taller than TargetBandHeightPx
+// reads at too low a DPI, so the page is divided into just enough bands to bring each under that height (capped at
 // MaxBands for cost). After compression most forms need far fewer bands — often a single whole-page read. Each
 // band is greyscaled + contrast-stretched to make light ticks stand out, and the bands overlap so a choice group
 // straddling a cut still appears whole in at least one; the per-band OCR results are merged back by
@@ -39,34 +39,40 @@ internal static class ImageTiler
             using var input = new MemoryStream(bytes);
             using var decoded = new Bitmap(input);
             // Trim the blank outer margin, then collapse the blank/rule bands between rows and between columns. All
-            // three free resolution for the actual marks; the band sizing below then works on the compacted page.
+            // three free resolution for the actual marks; the compacted page is then cut into OCR bands.
             using var cropped = CropToContent(decoded);
             using var compacted = CompressVertically(cropped);
             using var src = CompressHorizontally(compacted);
-
-            // Split only as far as needed: just enough overlapping bands to bring each under TargetBandHeightPx,
-            // capped for cost. After compression a normal form is often short enough to read whole (one band).
-            var bands = Math.Clamp((src.Height + TargetBandHeightPx - 1) / TargetBandHeightPx, 1, MaxBands);
-            if (bands < 2)
-                return new[] { (Enhance(src, 0, src.Height), "image/png") };
-
-            var bandHeight = (int)Math.Ceiling(src.Height * (1.0 / bands) * (1.0 + overlap));
-            bandHeight = Math.Min(bandHeight, src.Height);
-            var step = (src.Height - bandHeight) / (double)(bands - 1);
-
-            var result = new List<(byte[], string)>(bands);
-            for (var i = 0; i < bands; i++)
-            {
-                var top = (int)Math.Round(i * step);
-                top = Math.Min(top, src.Height - bandHeight);
-                result.Add((Enhance(src, top, bandHeight), "image/png"));
-            }
-            return result;
+            return SplitIntoBands(src, overlap);
         }
         catch
         {
             return new[] { (bytes, mediaType) };
         }
+    }
+
+    // Cuts the compacted page into just enough overlapping, enhanced horizontal bands: as few as bring every band
+    // under TargetBandHeightPx (so its content reads at adequate DPI), capped at MaxBands for cost. After
+    // compression a normal form is often short enough to read whole — a single band. The bands overlap so a choice
+    // group straddling a cut still appears whole in at least one.
+    private static IReadOnlyList<(byte[] Bytes, string MediaType)> SplitIntoBands(Bitmap src, double overlap)
+    {
+        var bands = Math.Clamp((src.Height + TargetBandHeightPx - 1) / TargetBandHeightPx, 1, MaxBands);
+        if (bands < 2)
+            return new[] { (Enhance(src, 0, src.Height), "image/png") };
+
+        var bandHeight = (int)Math.Ceiling(src.Height * (1.0 / bands) * (1.0 + overlap));
+        bandHeight = Math.Min(bandHeight, src.Height);
+        var step = (src.Height - bandHeight) / (double)(bands - 1);
+
+        var result = new List<(byte[], string)>(bands);
+        for (var i = 0; i < bands; i++)
+        {
+            var top = (int)Math.Round(i * step);
+            top = Math.Min(top, src.Height - bandHeight);
+            result.Add((Enhance(src, top, bandHeight), "image/png"));
+        }
+        return result;
     }
 
     // Returns the smallest region that still contains all of the form's content, dropping the blank scan
@@ -171,8 +177,7 @@ internal static class ImageTiler
     private static Bitmap CompressVertically(Bitmap src)
     {
         ScanInk(src, out var rowInk, out _);
-        var n = Math.Max(1, src.Width / TargetResolution);
-        var segments = KeptSegments(rowInk, src.Height, src.Width, n);
+        var segments = KeptSegments(rowInk, src.Height, src.Width, UnitLine(src.Width));
         return Rebuild(src, segments, vertical: true);
     }
 
@@ -184,10 +189,13 @@ internal static class ImageTiler
     private static Bitmap CompressHorizontally(Bitmap src)
     {
         ScanInk(src, out _, out var colInk);
-        var n = Math.Max(1, src.Width / TargetResolution);
-        var segments = KeptSegments(colInk, src.Width, src.Height, n);
+        var segments = KeptSegments(colInk, src.Width, src.Height, UnitLine(src.Width));
         return Rebuild(src, segments, vertical: false);
     }
+
+    // n: how many source lines collapse into one model pixel — the unit-line. Deciding keep/drop finer than this
+    // is pointless (the model averages that many lines into one pixel), so it is the granularity for compaction.
+    private static int UnitLine(int width) => Math.Max(1, width / TargetResolution);
 
     // Axis-agnostic core of the two compaction passes. lineInk is the ink count per line along the compaction axis
     // (rows for vertical, columns for horizontal); lineCount is the axis length; perpDim is each line's full length
