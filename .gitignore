@@ -27,3 +27,11 @@ Desktop.ini
 
 # ---- Claude local settings (machine-local) ----
 .claude/settings.local.json
+
+# ---- Internal / not for the public repository ----
+# Design & handoff notes and the sample survey data (the images/CSV contain
+# realistic personal information) are kept locally but excluded from publishing.
+/data/
+/CLAUDE.md
+/HANDOFF.md
+/HANDOFF-Windows.md
