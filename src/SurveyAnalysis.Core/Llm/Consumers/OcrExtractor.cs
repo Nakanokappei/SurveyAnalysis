@@ -1,9 +1,11 @@
 using System;
 using System.Collections.Generic;
 using System.Text;
+using System.Linq;
 using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
+using SurveyAnalysis.Data;
 using SurveyAnalysis.Models;
 
 namespace SurveyAnalysis.Llm.Consumers;
@@ -55,6 +57,44 @@ public sealed class OcrExtractor
 
         var result = await _chat.CompleteAsync(request, ct).ConfigureAwait(false);
         return Parse(result.Content, fields);
+    }
+
+    // Merges the per-band OCR results of one image (OcrExtractor is run once per ImageTiler band) into a
+    // single 項目名→値 map. A 選択肢 field's selected options are unioned across the bands it appears in (a
+    // band that does not show the group returns nothing for it; the overlap means the whole group lands in
+    // at least one band), so a multi-select that straddles a band cut is still complete. Every other field
+    // takes its longest non-empty reading — the band that captured the most of a value wins over one that
+    // caught only a sliver at its edge.
+    public static IReadOnlyDictionary<string, string> MergeValues(
+        IReadOnlyList<IReadOnlyDictionary<string, string>> bandResults,
+        IReadOnlyList<DataField> fields)
+    {
+        var merged = new Dictionary<string, string>();
+        foreach (var field in fields)
+        {
+            if (field.FieldType == FieldType.Choice)
+            {
+                var options = new List<string>();
+                foreach (var band in bandResults)
+                    if (band.TryGetValue(field.Name, out var value) && !string.IsNullOrWhiteSpace(value))
+                        foreach (var option in ChoiceValues.Split(value))
+                            if (!options.Contains(option))
+                                options.Add(option);
+                if (options.Count > 0)
+                    merged[field.Name] = string.Join("; ", options);
+            }
+            else
+            {
+                string? best = null;
+                foreach (var band in bandResults)
+                    if (band.TryGetValue(field.Name, out var value) && !string.IsNullOrWhiteSpace(value)
+                        && (best is null || value.Length > best.Length))
+                        best = value;
+                if (best is not null)
+                    merged[field.Name] = best;
+            }
+        }
+        return merged;
     }
 
     // Turns an extracted 項目名→値 map into one response: an answer per field that has a non-empty value,

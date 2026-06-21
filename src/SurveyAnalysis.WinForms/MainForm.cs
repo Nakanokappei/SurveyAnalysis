@@ -847,10 +847,20 @@ public sealed class MainForm : Form
         foreach (var path in imagePaths)
         {
             ct.ThrowIfCancellationRequested();
-            var bytes = await Task.Run(() => File.ReadAllBytes(path), ct).ConfigureAwait(false);
+            var raw = await Task.Run(() => File.ReadAllBytes(path), ct).ConfigureAwait(false);
             var mediaType = MediaTypeFor(path);
-            var values = await extractor.ExtractAsync(bytes, mediaType, fields, description, choiceOptions, ct).ConfigureAwait(false);
-            AppServices.ImageStaging.Add(projectId, Path.GetFileName(path), mediaType, bytes, values);
+            // Split the form into overlapping bands and OCR each: a short band is enlarged by the vision API
+            // (instead of the whole page being downsampled), so checkbox ticks read far more reliably. The
+            // per-band readings are merged; the original bytes are staged for the human review screen.
+            var bands = ImageTiler.ToBands(raw, mediaType);
+            var bandResults = new List<IReadOnlyDictionary<string, string>>(bands.Count);
+            foreach (var band in bands)
+            {
+                ct.ThrowIfCancellationRequested();
+                bandResults.Add(await extractor.ExtractAsync(band.Bytes, band.MediaType, fields, description, choiceOptions, ct).ConfigureAwait(false));
+            }
+            var values = OcrExtractor.MergeValues(bandResults, fields);
+            AppServices.ImageStaging.Add(projectId, Path.GetFileName(path), mediaType, raw, values);
             done++;
             progress.Report((done, total));
         }
