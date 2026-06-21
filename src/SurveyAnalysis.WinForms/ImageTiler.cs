@@ -1,40 +1,48 @@
 using System;
 using System.Collections.Generic;
 using System.Drawing;
+using System.Drawing.Drawing2D;
 using System.Drawing.Imaging;
 using System.IO;
 using System.Runtime.InteropServices;
 
 namespace SurveyAnalysis.WinForms;
 
-// Splits a scanned survey form into overlapping horizontal bands so each section's checkboxes fill more of
-// the vision model's resolution budget. A whole A4 page is downsampled by the vision API to ~768px on its
-// shortest side, shrinking a pen ✓ to a few pixels the model mis-reads. A short, wide band is upscaled
-// instead (its shortest side — the height — is small), so the same checkboxes are seen far larger. The
-// blank scan margin is trimmed off first (CropToContent), since every pixel of white border is resolution
-// the API spends on nothing. Each band is greyscaled + contrast-stretched to make light ticks stand out.
-// The bands overlap so a choice group that straddles a cut still appears whole in at least one band; the
-// per-band OCR results are merged back by OcrExtractor.MergeValues. Best-effort: any failure returns the
-// single whole image so OCR still runs.
+// Prepares a scanned survey form for OCR by spending the vision model's fixed resolution budget on marks
+// instead of blank paper, in three steps. (1) CropToContent trims the blank outer margin. (2) CompressVertically
+// removes the blank bands *between* filled rows, packing the content so a whole-page read sees each row larger
+// (forms are read top-to-bottom, so whole rows are the safe unit — a checkbox and its label stay together).
+// (3) The compacted page is split into overlapping horizontal bands only as far as needed: a band taller than
+// TargetBandHeightPx reads at too low a DPI, so the page is divided into just enough bands to bring each under
+// that height (capped at MaxBands for cost). After compression most forms need far fewer bands — often a single
+// whole-page read. Each band is greyscaled + contrast-stretched to make light ticks stand out, and the bands
+// overlap so a choice group straddling a cut still appears whole in at least one; the per-band OCR results are
+// merged back by OcrExtractor.MergeValues. Best-effort: any failure returns the single whole image so OCR runs.
 internal static class ImageTiler
 {
-    private const int DefaultBands = 4;
     private const double DefaultOverlap = 0.35;   // each band is 35% taller than an equal split → overlap
     private const float Contrast = 1.6f;          // > 1 darkens ticks, lightens paper (stretch around mid-gray)
     private const int InkLuma = 220;              // a pixel counts as content (ink) when its luma is below this; paper is brighter
+    private const int TargetResolution = 512;     // the cheap vision model's working square; sets the n-row decision granularity
+    private const int TargetBandHeightPx = 600;   // a band taller than this reads at too low a DPI → split the page further
+    private const int MaxBands = 4;               // cap on per-image OCR calls (cost ceiling)
+    private const float SignalPercent = 0.01f;    // a unit-line with < 1% ink is blank (the same 1% as the margin trim)
 
-    public static IReadOnlyList<(byte[] Bytes, string MediaType)> ToBands(byte[] bytes, string mediaType, int bands = DefaultBands, double overlap = DefaultOverlap)
+    public static IReadOnlyList<(byte[] Bytes, string MediaType)> ToBands(byte[] bytes, string mediaType, double overlap = DefaultOverlap)
     {
         try
         {
             using var input = new MemoryStream(bytes);
             using var decoded = new Bitmap(input);
-            // Trim the blank outer margin first so the form's content fills the frame the vision API will
-            // downsample. Everything below (band sizing, the short-page test) then works on the cropped page.
-            using var src = CropToContent(decoded);
+            // Trim the blank outer margin, then collapse the blank bands between filled rows. Both free vertical
+            // resolution for the actual marks; the band sizing below then works on the compacted page.
+            using var cropped = CropToContent(decoded);
+            using var src = CompressVertically(cropped);
 
-            // A short page does not benefit from splitting (the bands would be tiny); OCR it whole.
-            if (bands < 2 || src.Height < 600)
+            // Split only as far as needed: just enough overlapping bands to bring each under TargetBandHeightPx,
+            // capped for cost. After compression a normal form is often short enough to read whole (one band).
+            var bands = Math.Clamp((src.Height + TargetBandHeightPx - 1) / TargetBandHeightPx, 1, MaxBands);
+            if (bands < 2)
                 return new[] { (Enhance(src, 0, src.Height), "image/png") };
 
             var bandHeight = (int)Math.Ceiling(src.Height * (1.0 / bands) * (1.0 + overlap));
@@ -67,37 +75,7 @@ internal static class ImageTiler
     {
         var width = src.Width;
         var height = src.Height;
-        var rowInk = new int[height];
-        var colInk = new int[width];
-
-        // One read-only pass over the pixels (LockBits converts to a known BGRA layout regardless of the
-        // source format, so GetPixel's per-call cost is avoided on multi-megapixel scans).
-        var data = src.LockBits(new Rectangle(0, 0, width, height), ImageLockMode.ReadOnly, PixelFormat.Format32bppArgb);
-        try
-        {
-            var stride = data.Stride;
-            var buffer = new byte[stride * height];
-            Marshal.Copy(data.Scan0, buffer, 0, buffer.Length);
-            for (var y = 0; y < height; y++)
-            {
-                var rowBase = y * stride;
-                for (var x = 0; x < width; x++)
-                {
-                    var i = rowBase + x * 4;   // BGRA
-                    // Integer luma (0.114B + 0.587G + 0.299R), ×1000 to keep it in ints.
-                    var luma = (114 * buffer[i] + 587 * buffer[i + 1] + 299 * buffer[i + 2]) / 1000;
-                    if (luma < InkLuma)
-                    {
-                        rowInk[y]++;
-                        colInk[x]++;
-                    }
-                }
-            }
-        }
-        finally
-        {
-            src.UnlockBits(data);
-        }
+        ScanInk(src, out var rowInk, out var colInk);
 
         // A content line needs a sustained run of ink, not a few stray dark pixels (≥1% of its length, min 3).
         var minRow = Math.Max(3, width / 100);
@@ -141,6 +119,125 @@ internal static class ImageTiler
             if (counts[i] >= min)
                 return i;
         return -1;
+    }
+
+    // Counts ink pixels (luma below InkLuma) per row and per column in one read-only pass. LockBits converts to
+    // a known BGRA layout regardless of the source format, so GetPixel's per-call cost is avoided on multi-
+    // megapixel scans.
+    private static void ScanInk(Bitmap src, out int[] rowInk, out int[] colInk)
+    {
+        var width = src.Width;
+        var height = src.Height;
+        rowInk = new int[height];
+        colInk = new int[width];
+
+        var data = src.LockBits(new Rectangle(0, 0, width, height), ImageLockMode.ReadOnly, PixelFormat.Format32bppArgb);
+        try
+        {
+            var stride = data.Stride;
+            var buffer = new byte[stride * height];
+            Marshal.Copy(data.Scan0, buffer, 0, buffer.Length);
+            for (var y = 0; y < height; y++)
+            {
+                var rowBase = y * stride;
+                for (var x = 0; x < width; x++)
+                {
+                    var i = rowBase + x * 4;   // BGRA
+                    // Integer luma (0.114B + 0.587G + 0.299R), ×1000 to keep it in ints.
+                    var luma = (114 * buffer[i] + 587 * buffer[i + 1] + 299 * buffer[i + 2]) / 1000;
+                    if (luma < InkLuma)
+                    {
+                        rowInk[y]++;
+                        colInk[x]++;
+                    }
+                }
+            }
+        }
+        finally
+        {
+            src.UnlockBits(data);
+        }
+    }
+
+    // Removes the blank horizontal bands *inside* the form — the vertical whitespace between filled rows — so the
+    // content packs together and a whole-page read sees each row larger. Forms are read top-to-bottom (横書き), so
+    // whole rows are the unit: a row band is kept when ≥ SignalPercent of it is ink and dropped when effectively
+    // blank. Decisions are quantized to n-row blocks, where n is how many source rows collapse into one model pixel
+    // (width / TargetResolution) — finer than that the model cannot resolve. Each blank run is collapsed to at most
+    // one block on each side, which keeps a small gap so packed rows do not merge *and* leaves a quiet zone so a
+    // faint mark at a content edge is never sliced. Returns a full-frame copy when nothing is blank, so the caller
+    // can dispose the result uniformly.
+    private static Bitmap CompressVertically(Bitmap src)
+    {
+        var width = src.Width;
+        var height = src.Height;
+        ScanInk(src, out var rowInk, out _);
+
+        // n: source rows per model pixel — the unit-line. Below this granularity the model averages rows together,
+        // so there is no point deciding keep/drop more finely.
+        var n = Math.Max(1, width / TargetResolution);
+        var blockCount = (height + n - 1) / n;
+
+        // Mark each n-row block blank (ink below SignalPercent of its pixels) or content.
+        var blank = new bool[blockCount];
+        for (var b = 0; b < blockCount; b++)
+        {
+            var topRow = b * n;
+            var rows = Math.Min(n, height - topRow);
+            var ink = 0;
+            for (var y = topRow; y < topRow + rows; y++)
+                ink += rowInk[y];
+            blank[b] = ink < SignalPercent * rows * width;
+        }
+
+        // Keep every content block; for each blank run keep one block on each side (the gap + quiet zone) and
+        // drop the rest. A run of ≤ 2 blocks is left untouched.
+        var keep = new bool[blockCount];
+        for (var b = 0; b < blockCount; b++)
+            keep[b] = !blank[b];
+        for (var b = 0; b < blockCount;)
+        {
+            if (!blank[b]) { b++; continue; }
+            var start = b;
+            while (b < blockCount && blank[b]) b++;
+            keep[start] = true;       // adjacent to the content above (or the top edge)
+            keep[b - 1] = true;       // adjacent to the content below (or the bottom edge)
+        }
+
+        // Gather the kept blocks into contiguous source-row segments.
+        var segments = new List<(int Top, int Height)>();
+        for (var b = 0; b < blockCount;)
+        {
+            if (!keep[b]) { b++; continue; }
+            var start = b;
+            while (b < blockCount && keep[b]) b++;
+            var top = start * n;
+            segments.Add((top, Math.Min(height, b * n) - top));
+        }
+
+        var outHeight = 0;
+        foreach (var s in segments)
+            outHeight += s.Height;
+
+        // Nothing to gain (no blank removed, or the whole page is blank) → full-frame copy.
+        if (segments.Count == 0 || outHeight >= height)
+            return (Bitmap)src.Clone();
+
+        // Stack the kept segments. Nearest-neighbour + half-pixel offset keeps the 1:1 copy crisp (no blur on
+        // thin marks).
+        var outBmp = new Bitmap(width, outHeight, PixelFormat.Format32bppArgb);
+        using (var graphics = Graphics.FromImage(outBmp))
+        {
+            graphics.InterpolationMode = InterpolationMode.NearestNeighbor;
+            graphics.PixelOffsetMode = PixelOffsetMode.Half;
+            var destY = 0;
+            foreach (var (top, segHeight) in segments)
+            {
+                graphics.DrawImage(src, new Rectangle(0, destY, width, segHeight), new Rectangle(0, top, width, segHeight), GraphicsUnit.Pixel);
+                destY += segHeight;
+            }
+        }
+        return outBmp;
     }
 
     // Crops [top, top+height) of the source and returns it greyscaled + contrast-stretched as PNG (lossless;
