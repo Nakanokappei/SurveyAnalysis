@@ -71,7 +71,12 @@ internal static class SliceTableView
         // A dedicated 感情極性 column right after the dimension, shown in every report.
         grid.Columns.Add(TextColumn("感情極性\n平均", fillWeight: 16));
         foreach (var col in columns)
-            grid.Columns.Add(TextColumn($"{col.Name}\n{col.AggregationLabel}", fillWeight: 16));
+        {
+            // Drop the redundant second line when the column name already is its measure (the plain 件数
+            // summary column reads just "件数"); cross-tab columns keep "ラベル\n件数".
+            var header = col.AggregationLabel == col.Name ? col.Name : $"{col.Name}\n{col.AggregationLabel}";
+            grid.Columns.Add(TextColumn(header, fillWeight: 16));
+        }
         grid.ColumnHeadersDefaultCellStyle.WrapMode = DataGridViewTriState.True;
         grid.ColumnHeadersHeightSizeMode = DataGridViewColumnHeadersHeightSizeMode.AutoSize;
         return grid;

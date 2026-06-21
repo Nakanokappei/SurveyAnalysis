@@ -111,10 +111,45 @@ internal abstract class SliceControlBase<TVm> : UserControl where TVm : PeriodSc
         titles.Controls.Add(_summary);
 
         header.Controls.Add(titles, 0, 0);
-        // The picker pushes the new range into the view model (which reloads synchronously); RefreshAll
-        // re-reads the table afterwards.
-        header.Controls.Add(SliceTableView.BuildPeriodPicker(_vm, _rangePicker, RefreshAll), 1, 0);
+
+        // Right column: the 集計期間 picker with a CSV エクスポート button beneath it (both right-aligned). The
+        // picker pushes the new range into the view model (which reloads synchronously); RefreshAll re-reads
+        // the table afterwards.
+        var rightStack = new TableLayoutPanel { ColumnCount = 1, RowCount = 2, AutoSize = true, AutoSizeMode = AutoSizeMode.GrowAndShrink, Anchor = AnchorStyles.Right, BackColor = Theme.ContentBack };
+        rightStack.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
+        rightStack.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+        rightStack.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+        var picker = SliceTableView.BuildPeriodPicker(_vm, _rangePicker, RefreshAll);
+        picker.Anchor = AnchorStyles.Right;
+        rightStack.Controls.Add(picker, 0, 0);
+        rightStack.Controls.Add(BuildCsvButton(), 0, 1);
+        header.Controls.Add(rightStack, 1, 0);
         return header;
+    }
+
+    // The CSV エクスポート button under the 集計期間 picker: writes whichever grid is currently visible (the
+    // analysis table, or the drilled 個票 list) to a user-chosen CSV — the data exactly as shown.
+    private IconButton BuildCsvButton()
+    {
+        var button = new IconButton
+        {
+            Glyph = Icons.Csv.Glyph,
+            IconFontName = Icons.Csv.Font,
+            IconSize = 11f,
+            Text = "CSV エクスポート",
+            AutoSize = true,
+            Anchor = AnchorStyles.Right,
+            BackColor = Color.White,
+            ForeColor = Theme.TitleText,
+            Font = Theme.Font(9.5f),
+            Padding = new Padding(10, 5, 10, 5),
+            Margin = new Padding(0, LogicalToDeviceUnits(6), 0, 0),
+            Cursor = Cursors.Hand,
+        };
+        button.FlatAppearance.BorderColor = Theme.CardBorder;
+        button.FlatAppearance.BorderSize = 1;
+        button.Click += (_, _) => CsvExport.Export(this, _analysisGrid.Visible ? _analysisGrid : _responsesGrid, HeaderTitle);
+        return button;
     }
 
     // The single result card holds both grids; only the one for the current level is visible.

@@ -28,6 +28,9 @@ internal static class Icons
     public static readonly (string Font, string Glyph) Edit  = (Theme.Wingdings, "!");  // ✏ pencil
     public static readonly (string Font, string Glyph) Close = (Theme.Webdings,  "r");  // ✖
 
+    // CSV export — a literal comma (the user's chosen mark for "comma-separated values").
+    public static readonly (string Font, string Glyph) Csv = (Theme.IconFontName, "，");
+
     // Pictographs with no good Webdings equivalent — box-free Segoe UI Emoji.
     public static readonly (string Font, string Glyph) Dashboard = (Theme.IconFontName, "📊");
     public static readonly (string Font, string Glyph) Add       = (Theme.IconFontName, "➕");
