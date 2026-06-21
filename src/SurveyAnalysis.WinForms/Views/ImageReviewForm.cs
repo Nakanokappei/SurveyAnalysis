@@ -237,7 +237,21 @@ internal sealed class ImageReviewForm : Form
                 Padding = new Padding(0, 0, 0, 2),
             };
 
-            row.Controls.Add(box);       // Top (lower)
+            row.Controls.Add(box);       // Top (lowest)
+            // 選択肢型は複数選択を「;」区切りで 1 セルに持つ規約（ChoiceValues）だが、校正者は項目の
+            // データ型を画面上で意識できない。そこで選択肢の欄に限り、入力規則を行内にそっと添える。
+            if (field.FieldType == FieldType.Choice)
+            {
+                row.Controls.Add(new Label
+                {
+                    Text = $"複数選んでいる場合は「{ChoiceValues.Separator}」（半角）で区切ってください",
+                    Dock = DockStyle.Top,
+                    AutoSize = true,
+                    ForeColor = Theme.Muted,
+                    Font = Theme.Font(8.5f),
+                    Padding = new Padding(0, 2, 0, 0),
+                });                      // Top (between box and caption)
+            }
             row.Controls.Add(caption);   // Top (upper)
             _fieldsHost.Controls.Add(row);
             row.Dock = DockStyle.Top;
