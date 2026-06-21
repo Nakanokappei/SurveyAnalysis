@@ -16,10 +16,10 @@ public sealed record ResponseAnalysis(
     bool IsNegative,
     string? Topic);
 
-// One point of the 感情極性の推移 line: a month (year+month for ordering/labels), the average row
-// sentiment over that month's analysed responses within the scope, and how many fed the average.
-// From/To is the bucket's inclusive date range (a single day, or an ISO week Mon–Sun) — clicking the
-// point on the chart narrows the 集計期間 to it.
+// One point of the 感情極性の推移 line: a bucket (its axis + tooltip labels), the average row sentiment
+// over that bucket's analysed responses within the scope, and how many fed the average. From/To is the
+// bucket's inclusive date range (a single day, an ISO week Mon–Sun, or a whole calendar month — the
+// repository picks the grain by span) — clicking the point on the chart narrows the 集計期間 to it.
 public sealed record SentimentTrendPoint(string AxisLabel, string Label, double Average, int Count, DateTime From, DateTime To);
 
 // Builds and queries the analytics star schema. Rebuild performs the ETL: it reads a project's raw
@@ -302,9 +302,10 @@ public sealed class AnalyticsRepository
             .ToList();
     }
 
-    // The average row sentiment over the 集計期間 window (chronological), bucketed by day when the dated
-    // scored data spans ≤ 30 days and by ISO week otherwise — a short period reads day-by-day, a long one
-    // stays legible. Buckets with no analysed response are omitted. Dateless facts are excluded by the
+    // The average row sentiment over the 集計期間 window (chronological), bucketed by span: by day when the
+    // dated scored data spans ≤ 30 days, by calendar month when it spans > 183 days (over half a year), and
+    // by ISO week in between — a short period reads day-by-day, a long one stays legible. Buckets with no
+    // analysed response are omitted. Dateless facts are excluded by the
     // dim_date join. Drives the 感情極性の推移 line; the *For… overloads scope it to a drilled selection so
     // the line follows a drill-down / -up.
     public IReadOnlyList<SentimentTrendPoint> SentimentTrend(long projectId, long? fromKey, long? toKey)
@@ -328,8 +329,9 @@ public sealed class AnalyticsRepository
         => SentimentTrend(projectId, fromKey, toKey, WeekdayTrendFilter(dayOfWeek));
 
     // One query: the average row sentiment per day (with its ISO-week attributes) for the filtered facts.
-    // If the span is ≤ 30 days the days are the points; otherwise they are merged into ISO weeks (a
-    // count-weighted average), so a long period stays legible without a second round-trip to the database.
+    // If the span is ≤ 30 days the days are the points; 31–183 days are merged into ISO weeks and > 183 days
+    // into calendar months (a count-weighted average), so a long period stays legible without a second
+    // round-trip to the database.
     private IReadOnlyList<SentimentTrendPoint> SentimentTrend(long projectId, long? fromKey, long? toKey, TrendFilter filter)
     {
         using var connection = _db.Open();
@@ -350,16 +352,33 @@ public sealed class AnalyticsRepository
         if (days.Count == 0)
             return Array.Empty<SentimentTrendPoint>();
 
+        var span = (KeyToDate(days[^1].Key) - KeyToDate(days[0].Key)).Days;
+
         // ≤ 30-day span → one point per day (its [from, to] is that single day).
-        if ((KeyToDate(days[^1].Key) - KeyToDate(days[0].Key)).Days <= 30)
+        if (span <= 30)
             return days.Select(d =>
             {
                 var date = KeyToDate(d.Key);
                 return new SentimentTrendPoint($"{date.Month}/{date.Day}", date.ToString("yyyy/MM/dd"), d.Avg, d.Count, date, date);
             }).ToList();
 
-        // Otherwise merge the days into ISO weeks (count-weighted average); each point's [from, to] is the
-        // whole ISO week (Mon–Sun), so clicking it narrows the 集計期間 to that week.
+        // > half a year (183 days) → one point per calendar month (count-weighted average); each point's
+        // [from, to] is the whole month, so clicking it narrows the 集計期間 to that month.
+        if (span > 183)
+            return days
+                .GroupBy(d => { var date = KeyToDate(d.Key); return (date.Year, date.Month); })
+                .OrderBy(g => g.Key.Year).ThenBy(g => g.Key.Month)
+                .Select(g =>
+                {
+                    var count = g.Sum(d => d.Count);
+                    var avg = count == 0 ? 0 : g.Sum(d => d.Avg * d.Count) / count;
+                    var first = new DateTime(g.Key.Year, g.Key.Month, 1);
+                    return new SentimentTrendPoint($"{g.Key.Year}/{g.Key.Month}", $"{g.Key.Year}年{g.Key.Month}月", avg, count, first, first.AddMonths(1).AddDays(-1));
+                })
+                .ToList();
+
+        // Otherwise (31–183 days) merge the days into ISO weeks (count-weighted average); each point's
+        // [from, to] is the whole ISO week (Mon–Sun), so clicking it narrows the 集計期間 to that week.
         return days
             .GroupBy(d => (d.WeekYear, d.WeekOfYear))
             .OrderBy(g => g.Key.WeekYear).ThenBy(g => g.Key.WeekOfYear)

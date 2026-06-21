@@ -8,7 +8,8 @@ namespace SurveyAnalysis.Tests;
 
 // AnalyticsRepository.SentimentTrend averages row sentiment over the window in chronological order, over
 // responses that have a sentiment score — the data behind the 感情極性の推移 line. The bucket adapts to the
-// data span: ≤ 30 days → one point per day; longer → one point per ISO week.
+// data span: ≤ 30 days → one point per day; 31–183 days → one point per ISO week; > 183 days (over half a
+// year) → one point per calendar month.
 public class SentimentTrendTests
 {
     private static SurveyResponse Resp(string date, string opinion) =>
@@ -84,6 +85,35 @@ public class SentimentTrendTests
         // The week point's range is the whole ISO week (Mon–Sun): 2026/05/04 (Mon) … 05/10 (Sun).
         Assert.Equal(new DateTime(2026, 5, 4), trend[0].From);
         Assert.Equal(new DateTime(2026, 5, 10), trend[0].To);
+    }
+
+    [Fact]
+    public void Monthly_buckets_when_the_span_exceeds_half_a_year()
+    {
+        var (temp, _, responses, results, analytics, project) = Setup();
+        using var _t = temp;
+
+        // Span 01/10..08/20 = 222 days > 183 → calendar-month buckets. The two January days share a month.
+        responses.InsertResponses(project.Id, "t", new[] { Resp("2026/01/10", "a"), Resp("2026/01/25", "b"), Resp("2026/08/20", "c") });
+        var rows = responses.LoadForProjectWithIds(project.Id);
+        results.SaveRowSentiment(rows[0].Id, 0.2, false);
+        results.SaveRowSentiment(rows[1].Id, 0.4, false);
+        results.SaveRowSentiment(rows[2].Id, -0.6, true);
+        analytics.Rebuild(project);
+
+        var trend = analytics.SentimentTrend(project.Id, null, null);
+
+        Assert.Equal(2, trend.Count);
+        Assert.Equal("2026/1", trend[0].AxisLabel);
+        Assert.Equal(0.3, trend[0].Average, 3);   // January: (0.2 + 0.4) / 2
+        Assert.Equal(2, trend[0].Count);
+        Assert.Equal("2026年1月", trend[0].Label);   // month label (tooltip)
+        Assert.Equal("2026/8", trend[1].AxisLabel);
+        Assert.Equal(-0.6, trend[1].Average, 3);
+
+        // The month point's range is the whole calendar month: 2026/01/01 … 01/31 (clicking narrows to it).
+        Assert.Equal(new DateTime(2026, 1, 1), trend[0].From);
+        Assert.Equal(new DateTime(2026, 1, 31), trend[0].To);
     }
 
     [Fact]
