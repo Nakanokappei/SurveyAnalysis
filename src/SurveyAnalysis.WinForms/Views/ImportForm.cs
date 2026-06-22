@@ -6,6 +6,7 @@ using System.IO;
 using System.Linq;
 using System.Threading.Tasks;
 using System.Windows.Forms;
+using SurveyAnalysis.Data;
 using SurveyAnalysis.Llm.Consumers;
 using SurveyAnalysis.Models;
 using SurveyAnalysis.ViewModels;
@@ -190,13 +191,14 @@ internal sealed class ImportForm : Form
     {
         using var picker = new OpenFileDialog
         {
-            Title = "CSV / TSV ファイルを選択",
-            Filter = "CSV / TSV / テキスト (*.csv;*.tsv;*.txt)|*.csv;*.tsv;*.txt|すべてのファイル (*.*)|*.*",
+            Title = "ファイルを選択",
+            // The delimiter / encoding are auto-detected on read, so the two entries differ only in which
+            // extensions they list — pick whichever matches the file at hand.
+            Filter = "カンマ区切りテキストファイル (*.csv;*.txt)|*.csv;*.txt|タブ区切りテキストファイル (*.tsv;*.txt)|*.tsv;*.txt",
         };
         if (picker.ShowDialog(this) != DialogResult.OK)
             return;
 
-        var bytes = File.ReadAllBytes(picker.FileName);
         var fileName = Path.GetFileName(picker.FileName);
 
         // Parse on a background thread (LoadCsvAsync) so the dialog stays responsive; disable the picker
@@ -206,9 +208,22 @@ internal sealed class ImportForm : Form
         UseWaitCursor = true;
         try
         {
+            var bytes = File.ReadAllBytes(picker.FileName);
             await _vm.LoadCsvAsync(bytes, fileName);   // exact-name auto-mapping happens inside
             RebuildColumns();
             await RefineMappingWithLlm();               // LLM-map any columns left blank
+        }
+        catch (CsvFormatException ex)
+        {
+            // The file couldn't be interpreted (encoding / column count / empty) — show the cause.
+            _status.Text = ex.Message;
+            _status.Visible = true;
+            MessageBox.Show(this, ex.Message, "読み込みエラー", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+        }
+        catch (System.Exception ex)
+        {
+            MessageBox.Show(this, $"ファイルを読み込めませんでした。\n{ex.Message}", "読み込みエラー",
+                MessageBoxButtons.OK, MessageBoxIcon.Error);
         }
         finally
         {

@@ -144,9 +144,9 @@ internal sealed class SettingsForm : Form
         var page = NewPage("全般");
         var grid = NewGrid();
         AddRow(grid, "会社名", Bound(new TextBox(), nameof(_vm.CompanyName), 150));
-        // The image-read folder is no longer pre-configured here: 「画像から取り込む」 asks for the folder
+        // The read folder is no longer pre-configured here: 「ファイルから読み込む」 asks for the folder
         // each time (defaulting to the last-used location), so there is nothing to set in advance.
-        AddRow(grid, "", new Label { Text = "画像の読み取りフォルダは「画像から取り込む」の実行時に毎回選びます（前回の場所が既定）。", AutoSize = true, ForeColor = Theme.Muted, Font = Theme.Font(8.5f), Margin = new Padding(0, 6, 0, 0) });
+        AddRow(grid, "", new Label { Text = "読み取りフォルダは「フォルダから読み込む」の実行時に毎回選びます（前回の場所が既定）。", AutoSize = true, ForeColor = Theme.Muted, Font = Theme.Font(8.5f), Margin = new Padding(0, 6, 0, 0) });
         // App version (this dialog doubles as the about box — there is no separate バージョン情報 window).
         AddRow(grid, "バージョン", new Label { Text = AppVersion(), AutoSize = true, ForeColor = Theme.BodyText, Font = Theme.Font(9.5f), Margin = new Padding(0, 16, 0, 0) });
         page.Controls.Add(grid);

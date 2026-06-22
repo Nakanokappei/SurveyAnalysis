@@ -362,8 +362,8 @@ public sealed class MainForm : Form
             // off from the report navigation by a divider — so a short window scrolls down to reach them.
             AddRow(nav, Divider());
             AddRow(nav, NavButton(Icons.Add, "インポート (CSV)", () => _shell.ImportCommand.Execute(null)));
-            AddRow(nav, NavButton(Icons.Image, "画像を読み込む", () => _shell.ImportImagesCommand.Execute(null)));
-            AddRow(nav, NavButton(Icons.Folder, "フォルダから画像を読み込む", () => _shell.ImportImagesFromFolderCommand.Execute(null)));
+            AddRow(nav, NavButton(Icons.Image, "ファイルから読み込む", () => _shell.ImportImagesCommand.Execute(null)));
+            AddRow(nav, NavButton(Icons.Folder, "フォルダから読み込む", () => _shell.ImportImagesFromFolderCommand.Execute(null)));
             AddRow(nav, NavButton(Icons.Export, "エクスポート", OnExport));
             // 閉じる is set apart from the import/export group by extra top spacing so it reads as distinct.
             var close = NavButton(Icons.Close, "プロジェクトを閉じる", OnCloseProject);
@@ -567,8 +567,10 @@ public sealed class MainForm : Form
     {
         using var picker = new OpenFileDialog
         {
-            Title = "CSV / TSV ファイルからプロジェクトを作成",
-            Filter = "CSV / TSV / テキスト (*.csv;*.tsv;*.txt)|*.csv;*.tsv;*.txt|すべてのファイル (*.*)|*.*",
+            Title = "ファイルからプロジェクトを作成",
+            // The delimiter / encoding are auto-detected on read, so the two entries differ only in which
+            // extensions they list — pick whichever matches the file at hand.
+            Filter = "カンマ区切りテキストファイル (*.csv;*.txt)|*.csv;*.txt|タブ区切りテキストファイル (*.tsv;*.txt)|*.tsv;*.txt",
         };
         if (picker.ShowDialog(this) != DialogResult.OK)
             return;
@@ -576,10 +578,29 @@ public sealed class MainForm : Form
         // Reading + parsing the CSV and building the design dialog takes a noticeable beat; show a busy
         // cursor so the file pick is acknowledged until the dialog appears (same as OnEditSchema).
         Cursor.Current = Cursors.WaitCursor;
-        var vm = new ProjectDesignViewModel(File.ReadAllBytes(picker.FileName), Path.GetFileName(picker.FileName));
+        ProjectDesignViewModel vm;
+        try
+        {
+            // The view model parses the file in its constructor (CsvFile.Parse) — a bad encoding / column
+            // count / empty file throws CsvFormatException, which we surface with its cause.
+            vm = new ProjectDesignViewModel(File.ReadAllBytes(picker.FileName), Path.GetFileName(picker.FileName));
+        }
+        catch (CsvFormatException ex)
+        {
+            Cursor.Current = Cursors.Default;
+            MessageBox.Show(this, ex.Message, "読み込みエラー", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+            return;
+        }
+        catch (Exception ex)
+        {
+            Cursor.Current = Cursors.Default;
+            MessageBox.Show(this, $"ファイルを読み込めませんでした。\n{ex.Message}", "読み込みエラー",
+                MessageBoxButtons.OK, MessageBoxIcon.Error);
+            return;
+        }
         if (vm.SourceCsv is null || vm.SourceCsv.Header.Count == 0)
         {
-            MessageBox.Show(this, "このファイルから列を読み取れませんでした。", "CSV からプロジェクトを作る",
+            MessageBox.Show(this, "このファイルから列を読み取れませんでした。", "読み込みエラー",
                 MessageBoxButtons.OK, MessageBoxIcon.Warning);
             return;
         }
@@ -687,16 +708,18 @@ public sealed class MainForm : Form
         form.ShowDialog(this);
     }
 
-    // ===== 画像の読み込み（ファイル選択 / フォルダ選択 → OCR → 仮テーブル → 校正 → 回答） =====
+    // ===== ファイルの読み込み（ファイル選択 / フォルダ選択 → OCR → 仮テーブル → 校正 → 回答） =====
     //
-    // 二つの入口（選んだ画像ファイル群 / 選んだフォルダ直下の全画像）が、同じ共通処理 RunImageImport に
-    // 画像パスの一覧を渡す。読み取りは vision OCR で「仮テーブル」(image_import_staging) に貯め、校正画面で
-    // 画像と読み取り値を見比べ、レコードごとに「取り込む」で初めて responses へ確定。確定があれば CSV と
-    // 同じ感情/トピック解析 → スター再投影 → ダッシュボードを行う。確定するまで実データには一切入らない。
+    // 二つの入口（選んだファイル群 / 選んだフォルダ直下の全ファイル）が、同じ共通処理 RunImageImport に
+    // パスの一覧を渡す。対象は画像（JPG/PNG）と PDF。PDF は各ページを画像にラスタライズし、1ページを1件
+    // として扱う。読み取りは vision OCR で「仮テーブル」(image_import_staging) に貯め、校正画面で画像と
+    // 読み取り値を見比べ、レコードごとに「取り込む」で初めて responses へ確定。確定があれば CSV と同じ
+    // 感情/トピック解析 → スター再投影 → ダッシュボードを行う。確定するまで実データには一切入らない。
 
-    private static readonly string[] ScanImageExtensions = { ".jpg", ".jpeg", ".png", ".webp" };
+    // Supported import files: image formats plus PDF (PDF pages are rasterized to images before OCR).
+    private static readonly string[] ImportFileExtensions = { ".jpg", ".jpeg", ".png", ".pdf" };
 
-    // 画像を読み込む。画像ファイル（複数可）を直接選ばせる。前回のフォルダを既定にし、選んだ場所を記憶する。
+    // ファイルから読み込む。画像 / PDF（複数可）を直接選ばせる。前回のフォルダを既定にし、選んだ場所を記憶する。
     private void OnImportImages(Project project)
     {
         if (!TryGetImageSettings(out var settings))
@@ -705,9 +728,9 @@ public sealed class MainForm : Form
         List<string> images;
         using (var picker = new OpenFileDialog
         {
-            Title = "読み取る画像を選択（複数選択できます）",
+            Title = "読み取るファイルを選択（画像 / PDF・複数選択できます）",
             Multiselect = true,
-            Filter = "画像ファイル (*.png;*.jpg;*.jpeg;*.webp)|*.png;*.jpg;*.jpeg;*.webp|すべてのファイル (*.*)|*.*",
+            Filter = "画像ファイル (*.jpg;*.jpeg;*.png)|*.jpg;*.jpeg;*.png|PDF ファイル (*.pdf)|*.pdf",
             InitialDirectory = Directory.Exists(settings.ScanFolderPath) ? settings.ScanFolderPath : "",
         })
         {
@@ -726,23 +749,23 @@ public sealed class MainForm : Form
         RunImageImport(project, settings, images);
     }
 
-    // フォルダから画像を読み込む。フォルダを選ばせ、その直下の画像をすべて読み取る。
+    // フォルダから読み込む。フォルダを選ばせ、その直下の画像 / PDF をすべて読み取る。
     private void OnImportImagesFromFolder(Project project)
     {
         if (!TryGetImageSettings(out var settings))
             return;
 
         List<string> images;
-        using (var picker = new FolderBrowserDialog { Description = "読み取る画像のあるフォルダを選択", SelectedPath = settings.ScanFolderPath, UseDescriptionForTitle = true })
+        using (var picker = new FolderBrowserDialog { Description = "読み取るファイルのあるフォルダを選択", SelectedPath = settings.ScanFolderPath, UseDescriptionForTitle = true })
         {
             if (picker.ShowDialog(this) == DialogResult.OK)
             {
                 settings.ScanFolderPath = picker.SelectedPath;
-                images = EnumerateScanImages(picker.SelectedPath);
+                images = EnumerateImportFiles(picker.SelectedPath);
                 if (images.Count == 0 && AppServices.ImageStaging.CountForProject(project.Id) == 0)
                 {
-                    MessageBox.Show(this, $"フォルダに画像が見つかりませんでした。\n{picker.SelectedPath}",
-                        "フォルダから画像を読み込む", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                    MessageBox.Show(this, $"フォルダに画像 / PDF が見つかりませんでした。\n{picker.SelectedPath}",
+                        "フォルダから読み込む", MessageBoxButtons.OK, MessageBoxIcon.Information);
                     return;
                 }
             }
@@ -761,8 +784,8 @@ public sealed class MainForm : Form
         settings = _shell.CreateSettingsViewModel();
         if (!string.IsNullOrWhiteSpace(settings.ApiKey))
             return true;
-        MessageBox.Show(this, "画像の読み取りには OpenAI の API キーが必要です。設定の「LLM」で設定してください。",
-            "画像の読み込み", MessageBoxButtons.OK, MessageBoxIcon.Information);
+        MessageBox.Show(this, "ファイルの読み取りには OpenAI の API キーが必要です。設定の「LLM」で設定してください。",
+            "ファイルの読み込み", MessageBoxButtons.OK, MessageBoxIcon.Information);
         return false;
     }
 
@@ -777,8 +800,8 @@ public sealed class MainForm : Form
         if (images.Count > 0)
         {
             var confirm = MessageBox.Show(this,
-                $"{images.Count} 件の画像を読み取ります。読み取り後、校正画面で確認してから取り込みます。よろしいですか？",
-                "画像の読み込み", MessageBoxButtons.OKCancel, MessageBoxIcon.Question);
+                $"{images.Count} 件のファイルを読み取ります。読み取り後、校正画面で確認してから取り込みます。よろしいですか？",
+                "ファイルの読み込み", MessageBoxButtons.OKCancel, MessageBoxIcon.Question);
             if (confirm != DialogResult.OK)
                 return;
 
@@ -794,7 +817,7 @@ public sealed class MainForm : Form
         var staged = AppServices.ImageStaging.ListForProject(project.Id);
         if (staged.Count == 0)
         {
-            MessageBox.Show(this, "校正する読み取り結果がありませんでした。", "画像の読み込み",
+            MessageBox.Show(this, "校正する読み取り結果がありませんでした。", "ファイルの読み込み",
                 MessageBoxButtons.OK, MessageBoxIcon.Information);
             return;
         }
@@ -811,11 +834,11 @@ public sealed class MainForm : Form
         }
     }
 
-    // Image files directly under the chosen folder, sorted by name for a stable processing order.
-    private static List<string> EnumerateScanImages(string folder) =>
+    // Image / PDF files directly under the chosen folder, sorted by name for a stable processing order.
+    private static List<string> EnumerateImportFiles(string folder) =>
         Directory.Exists(folder)
             ? Directory.EnumerateFiles(folder)
-                .Where(f => ScanImageExtensions.Contains(Path.GetExtension(f).ToLowerInvariant()))
+                .Where(f => ImportFileExtensions.Contains(Path.GetExtension(f).ToLowerInvariant()))
                 .OrderBy(f => f, StringComparer.OrdinalIgnoreCase)
                 .ToList()
             : new List<string>();
@@ -835,44 +858,85 @@ public sealed class MainForm : Form
         return map;
     }
 
-    // Reads + OCR-extracts each image in turn (reporting n/total) and stages the result — image bytes plus
-    // the read values — without touching responses. Bytes are read off the UI thread; the vision call
-    // awaits off-thread. A read/OCR error propagates so the dialog reports it; images read before it are
-    // already staged and can be reviewed. The LLM cache makes re-reading the same image free.
+    // Reads + OCR-extracts each file in turn (reporting n/total) and stages the result — image bytes plus
+    // the read values — without touching responses. Image files stage one record each; a PDF is rasterized
+    // and stages one record per page (one page = one response). Bytes are read and pages rendered off the UI
+    // thread; the vision call awaits off-thread. A read/OCR error propagates so the dialog reports it; files
+    // read before it are already staged and can be reviewed. The LLM cache makes re-reading the same image free.
     private static async Task OcrImagesToStagingAsync(
         OcrExtractor extractor, IReadOnlyList<DataField> fields, string description,
         IReadOnlyDictionary<string, IReadOnlyList<string>> choiceOptions, long projectId,
-        IReadOnlyList<string> imagePaths, IProgress<(int Done, int Total)> progress, CancellationToken ct)
+        IReadOnlyList<string> filePaths, IProgress<(int Done, int Total)> progress, CancellationToken ct)
     {
-        var total = imagePaths.Count;
-        var done = 0;
-        foreach (var path in imagePaths)
+        // Reads every value from one rendered page / image: split into overlapping bands and OCR each (a
+        // short band is enlarged by the vision API instead of the whole page being downsampled, so checkbox
+        // ticks read far more reliably), then merge the per-band readings.
+        async Task<IReadOnlyDictionary<string, string>> ReadValuesAsync(byte[] imageBytes, string mediaType)
         {
-            ct.ThrowIfCancellationRequested();
-            var raw = await Task.Run(() => File.ReadAllBytes(path), ct).ConfigureAwait(false);
-            var mediaType = MediaTypeFor(path);
-            // Split the form into overlapping bands and OCR each: a short band is enlarged by the vision API
-            // (instead of the whole page being downsampled), so checkbox ticks read far more reliably. The
-            // per-band readings are merged; the original bytes are staged for the human review screen.
-            var bands = ImageTiler.ToBands(raw, mediaType);
+            var bands = ImageTiler.ToBands(imageBytes, mediaType);
             var bandResults = new List<IReadOnlyDictionary<string, string>>(bands.Count);
             foreach (var band in bands)
             {
                 ct.ThrowIfCancellationRequested();
                 bandResults.Add(await extractor.ExtractAsync(band.Bytes, band.MediaType, fields, description, choiceOptions, ct).ConfigureAwait(false));
             }
-            var values = OcrExtractor.MergeValues(bandResults, fields);
-            AppServices.ImageStaging.Add(projectId, Path.GetFileName(path), mediaType, raw, values);
-            done++;
-            progress.Report((done, total));
+            return OcrExtractor.MergeValues(bandResults, fields);
+        }
+
+        // Count work units up front (one per image, one per PDF page) so the progress bar is accurate.
+        var total = 0;
+        foreach (var path in filePaths)
+        {
+            ct.ThrowIfCancellationRequested();
+            if (IsPdf(path))
+            {
+                var bytes = await Task.Run(() => File.ReadAllBytes(path), ct).ConfigureAwait(false);
+                total += await Task.Run(() => PdfRasterizer.GetPageCount(bytes), ct).ConfigureAwait(false);
+            }
+            else
+                total++;
+        }
+
+        var done = 0;
+        foreach (var path in filePaths)
+        {
+            ct.ThrowIfCancellationRequested();
+            var raw = await Task.Run(() => File.ReadAllBytes(path), ct).ConfigureAwait(false);
+            var name = Path.GetFileName(path);
+            if (IsPdf(path))
+            {
+                // Rasterize each page to a PNG and stage it as its own record; suffix the source name with
+                // the page number when the PDF has more than one page.
+                var pageCount = await Task.Run(() => PdfRasterizer.GetPageCount(raw), ct).ConfigureAwait(false);
+                for (var p = 0; p < pageCount; p++)
+                {
+                    ct.ThrowIfCancellationRequested();
+                    var pageIndex = p;
+                    var png = await Task.Run(() => PdfRasterizer.RenderPageToPng(raw, pageIndex), ct).ConfigureAwait(false);
+                    var sourceName = pageCount > 1 ? $"{name} (p.{p + 1})" : name;
+                    var values = await ReadValuesAsync(png, "image/png").ConfigureAwait(false);
+                    AppServices.ImageStaging.Add(projectId, sourceName, "image/png", png, values);
+                    done++;
+                    progress.Report((done, total));
+                }
+            }
+            else
+            {
+                var mediaType = MediaTypeFor(path);
+                var values = await ReadValuesAsync(raw, mediaType).ConfigureAwait(false);
+                AppServices.ImageStaging.Add(projectId, name, mediaType, raw, values);
+                done++;
+                progress.Report((done, total));
+            }
         }
     }
+
+    private static bool IsPdf(string path) => Path.GetExtension(path).Equals(".pdf", StringComparison.OrdinalIgnoreCase);
 
     // The data-URL media type for an image path (defaults to JPEG for .jpg/.jpeg and anything unexpected).
     private static string MediaTypeFor(string path) => Path.GetExtension(path).ToLowerInvariant() switch
     {
         ".png" => "image/png",
-        ".webp" => "image/webp",
         _ => "image/jpeg",
     };
 

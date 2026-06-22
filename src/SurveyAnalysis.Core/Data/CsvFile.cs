@@ -25,26 +25,38 @@ public sealed class CsvFile
     {
         var text = Decode(bytes);
         var records = ParseRecords(text, DetectDelimiter(text));
+        // An empty file (or one whose only lines were blank) has no header to map columns from.
         if (records.Count == 0)
-            return new CsvFile(Array.Empty<string>(), Array.Empty<string[]>());
+            throw new CsvFormatException("ファイルが空か、ヘッダー行を読み取れませんでした。");
 
         var header = records[0];
+        // RFC-4180 requires every record to have the same field count as the header. A mismatch means a
+        // torn row or an unquoted delimiter — report which data row and the counts rather than importing
+        // misaligned values (which would also crash the column-indexed preview / merge downstream).
+        for (var r = 1; r < records.Count; r++)
+            if (records[r].Length != header.Length)
+                throw new CsvFormatException(
+                    $"データ {r} 行目の列数（{records[r].Length}）がヘッダーの列数（{header.Length}）と一致しません。" +
+                    "区切り文字や改行を含む値は \" で囲んでください（RFC4180）。");
+
         var rows = records.GetRange(1, records.Count - 1);
         return new CsvFile(header, rows);
     }
 
-    // Shift-JIS (CP932) needs the CodePages provider, which is registered the first time this type
-    // is used. The static field guarantees registration before any decode runs.
-    private static readonly Encoding ShiftJis = RegisterAndGetShiftJis();
+    // Shift-JIS (CP932) needs the CodePages provider, registered the first time this type is used. We keep
+    // a *strict* decoder (throws on invalid bytes) so a file that is neither UTF-8 nor Shift-JIS is reported
+    // rather than silently turned into mojibake.
+    private static readonly Encoding StrictShiftJis = RegisterAndGetStrictShiftJis();
 
-    private static Encoding RegisterAndGetShiftJis()
+    private static Encoding RegisterAndGetStrictShiftJis()
     {
         Encoding.RegisterProvider(CodePagesEncodingProvider.Instance);
-        return Encoding.GetEncoding(932);
+        return Encoding.GetEncoding(932, EncoderFallback.ExceptionFallback, DecoderFallback.ExceptionFallback);
     }
 
-    // Chooses an encoding by BOM, otherwise tries strict UTF-8 and falls back to Shift-JIS — the
-    // two encodings a Japanese survey CSV is realistically in.
+    // Chooses an encoding by BOM; otherwise tries strict UTF-8, then strict Shift-JIS (CP932) — the two
+    // encodings a Japanese survey CSV/TSV is realistically in. If neither decodes cleanly the file is in
+    // some other encoding (or isn't text at all), which we surface as an error.
     private static string Decode(byte[] bytes)
     {
         if (bytes.Length >= 3 && bytes[0] == 0xEF && bytes[1] == 0xBB && bytes[2] == 0xBF)
@@ -61,7 +73,16 @@ public sealed class CsvFile
         }
         catch (DecoderFallbackException)
         {
-            return ShiftJis.GetString(bytes);
+            // Not valid UTF-8 — fall through and try Shift-JIS.
+        }
+
+        try
+        {
+            return StrictShiftJis.GetString(bytes);
+        }
+        catch (DecoderFallbackException)
+        {
+            throw new CsvFormatException("文字コードを判定できませんでした。UTF-8（推奨）または Shift-JIS で保存し直してください。");
         }
     }
 

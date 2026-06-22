@@ -59,7 +59,7 @@ internal sealed class ImageReviewForm : Form
 
         AutoScaleDimensions = new SizeF(96F, 96F);
         AutoScaleMode = AutoScaleMode.Dpi;
-        Text = "画像から取り込む — 校正";
+        Text = "ファイルから取り込む — 校正";
         MaximizeBox = true;
         // Golden-ratio-ish working area; never smaller than fits the split.
         ClientSize = new Size(LogicalToDeviceUnits(960), LogicalToDeviceUnits(620));

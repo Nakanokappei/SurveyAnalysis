@@ -120,4 +120,30 @@ public class CsvFileTests
         Assert.Equal(new[] { "名前", "評価" }, csv.Header);
         Assert.Equal(new[] { "田中", "とても満足" }, csv.Rows[0]);
     }
+
+    [Fact]
+    public void Throws_when_a_row_has_a_different_column_count()
+    {
+        // The second data row has only two fields for a three-column header — a torn / misaligned row.
+        var ex = Assert.Throws<CsvFormatException>(
+            () => CsvFile.Parse(Encoding.UTF8.GetBytes("a,b,c\n1,2,3\n4,5\n")));
+
+        Assert.Contains("2 行目", ex.Message);
+    }
+
+    [Fact]
+    public void Throws_on_an_empty_file()
+    {
+        Assert.Throws<CsvFormatException>(() => CsvFile.Parse(System.Array.Empty<byte>()));
+    }
+
+    [Fact]
+    public void Throws_when_encoding_is_neither_utf8_nor_shift_jis()
+    {
+        // 0x81 is a CP932 lead byte followed by 0x20 (an invalid trail) — also an invalid UTF-8 start byte,
+        // so neither strict decoder accepts it.
+        var bytes = new byte[] { 0x81, 0x20, 0x81, 0x20 };
+
+        Assert.Throws<CsvFormatException>(() => CsvFile.Parse(bytes));
+    }
 }

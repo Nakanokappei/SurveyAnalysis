@@ -49,6 +49,11 @@
 
   <ItemGroup>
     <PackageReference Include="QuestPDF" Version="2026.6.0" />
+    <!-- PDFium (via PDFtoImage) rasterizes PDF pages to images so scanned-form PDFs go through the same
+         vision OCR path as image files. PDFtoImage's PDFium + SkiaSharp natives ship win-x64/x86/arm64, so
+         it works both on the production x64 build and on the arm64 dev VM; they self-extract in the
+         single-file build (IncludeNativeLibrariesForSelfExtract, set above). -->
+    <PackageReference Include="PDFtoImage" Version="5.1.0" />
   </ItemGroup>
 
 </Project>
